@@ -1,0 +1,34 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "pencil",
+  "version": "0.1.2",
+  "description": "Éditeur Pencil sans chat pour les fichiers .pen, avec canal par session et réservation multi-agent.",
+  "author": {
+    "name": "Julien M"
+  },
+  "license": "MIT",
+  "keywords": [
+    "pencil",
+    "pen",
+    "design",
+    "side-panel"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Pencil",
+        "shortDescription": "Éditer les .pen dans le panneau",
+        "longDescription": "Vue Pencil sans chat et canal partagé par les agents d’une même session de design.",
+        "developerName": "Julien M",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Ouvrir ce fichier .pen dans Pencil"
+        ]
+      }
+    }
+  }
+}
