@@ -8,11 +8,10 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "bun test tests/sessions.test.mjs tests/artifacts.test.mjs --timeout 2000 && node --test --test-timeout=2000 tests/broker.test.mjs tests/demo.test.mjs",
+    "test": "bun test tests/sessions.test.mjs tests/artifacts.test.mjs --timeout 2000 && node --test --test-timeout=2000 tests/broker.test.mjs",
     "test:protocol": "node tests/protocol.mjs",
     "start": "node src/server.mjs",
-    "preview": "node src/preview.mjs",
-    "demo": "node scripts/live-demo.mjs"
+    "preview": "node src/preview.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",

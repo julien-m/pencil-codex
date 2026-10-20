@@ -67,16 +67,6 @@ bun run preview /absolute/path/to/example.pen
 
 Open the local URL printed by that command. The preview is a development harness with its own broker; it does not automatically join the broker used by the installed MCP server. Its diagnostic output contains local connection credentials: do not publish it.
 
-For a two-agent live demo, start the agents while the editor is opening:
-
-```bash
-bun run demo /absolute/path/to/new-login-demo.pen
-```
-
-The launcher emits `prepared` immediately with the two screen IDs, then `preview-ready` with the local URL and shared `sessionId`. The coordinating agent should launch both subagents as soon as preparation starts, give each one its own screen ID, and open the URL visibly while they prepare their design calls. Start their edits once the engine is connected and both agents are ready. No whole-document `Get`, canvas preparation call, or IDs from an earlier run are needed. Each agent edits only its assigned frame.
-
-Private connection metadata is written under `.runtime/live-demo/` with restricted permissions; the printed `statePath` lets local collaborators access it without publishing tokens. The launcher never overwrites an existing design. This command starts the preview, not language-model agents; the coordinating agent launches those through its agent tools. Existing saved demonstrations remain unchanged.
-
 The build generates `dist/server.mjs`, `dist/daemon.mjs`, `dist/editor.html` and third-party license notices. Keep these files current when changing the source. Unit tests use Bun; the real HTTP/WebSocket transport and MCP stdio tests use Node.js, matching the installed runtime.
 
 ## Usage
