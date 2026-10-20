@@ -55,6 +55,63 @@ describe('session routing and reservations', () => {
     await r.saveAs(id,b.lease,path.join(dir,'fresh.pen'));
     expect(await fs.readFile(path.join(dir,'fresh.pen'),'utf8')).toBe('both-A-and-B');
   });
+  test('an autosave received before a single mutation response does not acknowledge it', async () => {
+    const r=new Sessions({draftRoot:path.join(dir,'drafts')});const {sessionId:id}=await r.open(path.join(dir,'a.pen'),'s');const messages=[];
+    const {generation,fileURI}=r.attach(id,m=>messages.push(m));await r.storage(id,generation,'storage-load');const {lease}=r.acquire(id,'A');
+    const edit=r.call(id,lease,'execute',{input:'Insert A'});
+    await r.storage(id,generation,'storage-write',{fileURI,content:'snapshot-before-reply'});
+    r.reply(id,generation,{id:messages[0].id,payload:{}});await edit;
+    expect(r.status(id).saveState).toBe('check-required');
+    await expect(r.saveAs(id,lease,path.join(dir,'stale.pen'))).rejects.toMatchObject({code:'SAVE_NOT_READY'});
+    await r.storage(id,generation,'storage-write',{fileURI,content:'snapshot-after-reply'});
+    expect(r.status(id).saveState).toBe('draft-saved');
+  });
+  test('a snapshot queued before a response stays unconfirmed when its disk write finishes later', async () => {
+    const r=new Sessions({draftRoot:path.join(dir,'drafts')});const {sessionId:id}=await r.open(path.join(dir,'a.pen'),'s');const messages=[];
+    const {generation,fileURI}=r.attach(id,m=>messages.push(m));await r.storage(id,generation,'storage-load');const {lease}=r.acquire(id,'A');
+    const edit=r.call(id,lease,'execute',{input:'Insert A'});
+    let finishWrite, entered;const writing=new Promise(resolve=>entered=resolve);const gate=new Promise(resolve=>finishWrite=resolve);const atomic=r.atomicWrite.bind(r);
+    r.atomicWrite=async(...args)=>{entered();await gate;return atomic(...args)};
+    const storage=r.storage(id,generation,'storage-write',{fileURI,content:'snapshot-before-reply'});await writing;
+    r.reply(id,generation,{id:messages[0].id,payload:{}});await edit;finishWrite();await storage;
+    expect(r.status(id).saveState).toBe('check-required');
+  });
+  test('calls wait through Save then dispatch concurrently, including schema discovery', async () => {
+    const r=new Sessions({timeout:200,draftRoot:path.join(dir,'drafts')});const {sessionId:id}=await r.open(path.join(dir,'a.pen'),'s');const messages=[];
+    const {generation}=r.attach(id,m=>messages.push(m));await r.storage(id,generation,'storage-load');const a=r.acquire(id,'A'),b=r.acquire(id,'B');
+    const save=r.save(id,a.lease);
+    const first=r.call(id,a.lease,'get_app_state'),second=r.call(id,b.lease,'get_app_state');const schema=r.request(id,'get-mcp-schema');
+    expect(messages).toHaveLength(1);expect(messages[0].method).toBe('save');
+    expect(()=>r.release(id,b.lease)).toThrow('cours');
+    r.reply(id,generation,{id:messages[0].id,payload:1});await save;
+    await new Promise(resolve=>setTimeout(resolve,0));expect(messages).toHaveLength(4);
+    for(const m of messages.slice(1))r.reply(id,generation,{id:m.id,payload:m.id});
+    const results=await Promise.all([first,second,schema]);expect(new Set(results).size).toBe(3);expect(r.status(id).activeCalls).toBe(0);
+  });
+  test('a failed Save rejects waiting calls without sending them to the editor', async () => {
+    const r=new Sessions({timeout:100,draftRoot:path.join(dir,'drafts')});const {sessionId:id}=await r.open(path.join(dir,'a.pen'),'s');const messages=[];
+    const {generation}=r.attach(id,m=>messages.push(m));await r.storage(id,generation,'storage-load');const a=r.acquire(id,'A'),b=r.acquire(id,'B');
+    const save=r.save(id,a.lease);const waiting=r.call(id,b.lease,'execute',{input:'Insert B'});
+    const checkedSave=save.catch(e=>e),checkedCall=waiting.catch(e=>e);
+    r.reply(id,generation,{id:messages[0].id,error:{message:'flush failed'}});for(const error of await Promise.all([checkedSave,checkedCall]))expect(error.code).toBe('EDITOR_ERROR');
+    expect(messages).toHaveLength(1);expect(r.status(id).activeCalls).toBe(0);expect(r.status(id).saving).toBe(false);
+  });
+  test('Save wait is bounded and a timed-out waiter never dispatches later', async () => {
+    const r=new Sessions({timeout:200,saveWaitTimeout:10,draftRoot:path.join(dir,'drafts')});const {sessionId:id}=await r.open(path.join(dir,'a.pen'),'s');const messages=[];
+    const {generation}=r.attach(id,m=>messages.push(m));await r.storage(id,generation,'storage-load');const a=r.acquire(id,'A'),b=r.acquire(id,'B');
+    const save=r.save(id,a.lease);const waiting=r.call(id,b.lease,'execute',{input:'Insert B'});
+    await expect(waiting).rejects.toMatchObject({code:'SAVE_WAIT_TIMEOUT'});
+    expect(r.status(id).activeCalls).toBe(0);expect(r.status(id).blocked).toBe(false);
+    r.reply(id,generation,{id:messages[0].id,payload:1});await save;
+    expect(messages).toHaveLength(1);
+  });
+  test('Save engine timeout propagates to waiting calls and blocks subsequent writes', async () => {
+    const r=new Sessions({timeout:15,saveWaitTimeout:100,draftRoot:path.join(dir,'drafts')});const {sessionId:id}=await r.open(path.join(dir,'a.pen'),'s');const messages=[];
+    const {generation}=r.attach(id,m=>messages.push(m));await r.storage(id,generation,'storage-load');const a=r.acquire(id,'A'),b=r.acquire(id,'B');
+    const save=r.save(id,a.lease).catch(e=>e);const waiting=r.call(id,b.lease,'execute',{input:'Insert B'}).catch(e=>e);
+    for(const error of await Promise.all([save,waiting]))expect(error.code).toBe('OUTCOME_UNKNOWN');
+    expect(r.status(id).blocked).toBe(true);expect(r.status(id).activeCalls).toBe(0);expect(messages).toHaveLength(1);
+  });
   test('timeout blocks writes and lease release instead of retrying', async () => {
     const r = new Sessions({ timeout: 15, draftRoot: path.join(dir, 'drafts') }); const { sessionId: id } = await r.open(path.join(dir, 'a.pen'), 's');
     r.attach(id, () => {}); const { lease } = r.acquire(id, 'A');

@@ -11,7 +11,7 @@ export class SessionError extends Error {
 const fail = (code, message) => { throw new SessionError(code, message); };
 
 export class Sessions {
-  constructor({ timeout = 15000, draftRoot = path.join(os.tmpdir(), 'pencil-panel-drafts') } = {}) { this.items = new Map(); this.timeout = timeout; this.draftRoot = draftRoot; }
+  constructor({ timeout = 15000, saveWaitTimeout = 5000, draftRoot = path.join(os.tmpdir(), 'pencil-panel-drafts') } = {}) { this.items = new Map(); this.timeout = timeout; this.saveWaitTimeout = saveWaitTimeout; this.draftRoot = draftRoot; }
   get(id) { return this.items.get(id) ?? fail('SESSION_NOT_FOUND', 'Session inconnue'); }
   async open(filename, scope) {
     if (!path.isAbsolute(filename) || path.extname(filename).toLowerCase() !== '.pen') fail('INVALID_PATH', 'Un fichier .pen absolu est requis');
@@ -26,7 +26,7 @@ export class Sessions {
     }
     const id = randomUUID();
     const draft = path.join(this.draftRoot, `${digest(`${scope}:${file}`)}.pen`);
-    const s = { id, scope, file, draft, exportJobs: new Map(), writeEpoch: 0, virtualRoot: `pencil/${id}/`, generation: 0, pending: new Map(), agents: new Map(), executions: new Set(), blocked: false, connected: false, savedHash: null, operations: 0, saveState: 'not-loaded' };
+    const s = { id, scope, file, draft, exportJobs: new Map(), mutationRevision: 0, virtualRoot: `pencil/${id}/`, generation: 0, pending: new Map(), agents: new Map(), blocked: false, connected: false, savedHash: null, operations: 0, saveState: 'not-loaded' };
     this.items.set(id, s);
     return this.status(id);
   }
@@ -52,7 +52,6 @@ export class Sessions {
   acquire(id, agent) {
     const s = this.get(id);
     if (s.blocked) fail('OUTCOME_UNKNOWN', 'Session bloquée après un résultat inconnu');
-    if (s.saving) fail('SAVE_IN_PROGRESS', 'Enregistrement en cours');
     // The legacy lease field is now a non-exclusive participation token.
     const token = randomUUID();
     s.agents.set(token, { agent, calls: 0 });
@@ -70,30 +69,53 @@ export class Sessions {
     const s = this.get(id), participant = s.agents.get(token);
     if (!participant) fail('INVALID_LEASE', 'Participation requise avant les appels');
     if (s.blocked) fail('OUTCOME_UNKNOWN', 'Session bloquée ; ne pas rejouer les mutations');
-    if (s.saving) fail('SAVE_IN_PROGRESS', 'Enregistrement en cours');
+    if (s.saving) {
+      participant.calls += 1; this.onActivity?.(id);
+      let resumed = false;
+      return this.afterSave(id, () => {
+        participant.calls -= 1; resumed = true;
+        return this.call(id, token, name, args, { observational });
+      }).finally(() => { if (!resumed) participant.calls -= 1; this.onActivity?.(id); });
+    }
     if (!['execute', 'read_skill', 'get_style', 'get_app_state'].includes(name)) fail('TOOL_NOT_ALLOWED', 'Outil non exposé par ce plugin');
     if (name === 'execute' && /\bGenerate\s*\(/.test(args.input ?? '')) fail('ASYNC_UNSUPPORTED', 'La génération asynchrone n’est pas prise en charge dans cette version');
     participant.calls += 1;
-    const writeEpoch = s.writeEpoch;
-    const execution = name === 'execute' && !observational ? { overlapped: s.executions.size > 0 } : null;
-    if (execution) {
-      for (const other of s.executions) other.overlapped = true;
-      s.executions.add(execution);
-    }
+    const mutation = name === 'execute' && !observational;
     // Dispatch immediately: each request has its own response ID, no document queue.
     let result;
     try { result = this.request(id, 'mcp-tool-call', { name, arguments: args }); }
-    catch (error) { participant.calls -= 1; if (execution) s.executions.delete(execution); throw error; }
+    catch (error) { participant.calls -= 1; throw error; }
     this.onActivity?.(id);
     return result.then(response => {
       s.operations += 1;
-      if (execution && (execution.overlapped || s.writeEpoch === writeEpoch)) s.saveState = 'check-required';
       return response;
-    }).finally(() => { participant.calls -= 1; if (execution) s.executions.delete(execution); this.onActivity?.(id); });
+    }).finally(() => {
+      participant.calls -= 1;
+      if (mutation) {
+        s.mutationRevision += 1;
+        if (s.saveState !== 'conflict') s.saveState = 'check-required';
+      }
+      this.onActivity?.(id);
+    });
+  }
+  async afterSave(id, operation) {
+    const s = this.get(id), deadline = Date.now() + this.saveWaitTimeout;
+    while (s.saving) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) fail('SAVE_WAIT_TIMEOUT', 'Délai d’attente de sauvegarde dépassé ; aucun appel envoyé');
+      const result = await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new SessionError('SAVE_WAIT_TIMEOUT', 'Délai d’attente de sauvegarde dépassé ; aucun appel envoyé')), remaining);
+        s.saveFinished.then(value => { clearTimeout(timer); resolve(value); });
+      });
+      if (result.error) throw result.error;
+    }
+    if (s.blocked) fail('OUTCOME_UNKNOWN', 'Session bloquée ; ne pas rejouer les mutations');
+    return operation();
   }
   request(id, method, payload) {
     const s = this.get(id);
-    if (s.saving && method !== 'save') fail('SAVE_IN_PROGRESS', 'Enregistrement en cours');
+    if (s.saving && method !== 'save') return this.afterSave(id, () => this.request(id, method, payload));
+    if (s.blocked) fail('OUTCOME_UNKNOWN', 'Session bloquée ; ne pas rejouer les mutations');
     if (!s.connected) fail('EDITOR_OFFLINE', 'Ouvrir le fichier .pen dans le panneau et attendre le moteur');
     const requestId = randomUUID();
     return new Promise((resolve, reject) => {
@@ -144,8 +166,11 @@ export class Sessions {
   }
   async save(id, token) {
     const s = this.get(id);
+    if (s.saving) return this.afterSave(id, () => this.save(id, token));
     if (!s.agents.has(token) || s.pending.size || [...s.agents.values()].some(a => a.calls) || s.blocked || s.saving) fail('SAVE_NOT_READY', 'Rejoindre la session et attendre la fin des opérations');
-    s.saving = true;
+    let finishSave, saveError;
+    s.saveFinished = new Promise(resolve => { finishSave = resolve; });
+    s.saving = true; this.onActivity?.(id);
     try {
       // Ask the engine to flush its current content, including unsaved manual edits.
       const result = await this.request(id, 'save');
@@ -166,10 +191,12 @@ export class Sessions {
           return { ...saved, sessionId: id };
         } catch (error) { if (error.code === 'SAVE_CONFLICT') s.saveState = 'conflict'; throw error; }
       });
-    } finally { s.saving = false; }
+    } catch (error) { saveError = error; throw error; }
+    finally { s.saving = false; finishSave({ error: saveError }); this.onActivity?.(id); }
   }
   async saveAs(id, token, filename) {
     const s = this.get(id);
+    if (s.saving) return this.afterSave(id, () => this.saveAs(id, token, filename));
     if (!s.agents.has(token) || s.pending.size || [...s.agents.values()].some(a => a.calls) || s.blocked || s.saving) fail('SAVE_NOT_READY', 'Rejoindre la session et attendre la fin des opérations');
     if (!['draft-saved', 'source-saved', 'conflict'].includes(s.saveState)) fail('SAVE_NOT_READY', 'Attendre un acquittement de sauvegarde du moteur avant Enregistrer sous');
     if (path.extname(filename).toLowerCase() !== '.pen') fail('INVALID_PATH', 'Choisir un nouveau fichier .pen');
@@ -182,9 +209,11 @@ export class Sessions {
     return result;
   }
   storage(id, generation, method, payload) {
-    return this.persist(this.get(id), () => this.storageNow(id, generation, method, payload));
+    const s = this.get(id), revision = s.mutationRevision;
+    // Capture at message arrival, before disk IO or the persistence queue can delay it.
+    return this.persist(s, () => this.storageNow(id, generation, method, payload, revision));
   }
-  async storageNow(id, generation, method, payload) {
+  async storageNow(id, generation, method, payload, revision) {
     const s = this.get(id);
     if (generation !== s.generation || !s.connected) fail('STALE_CHANNEL', 'Canal périmé');
     if (method === 'documents-save-preview') return null; // Optional dashboard thumbnail, no document persistence.
@@ -211,7 +240,7 @@ export class Sessions {
       await fs.mkdir(this.draftRoot, { recursive: true, mode: 0o700 });
       await this.atomicWrite(s.draft, Buffer.from(payload.content));
       await this.atomicWrite(`${s.draft}.baseline`, Buffer.from(JSON.stringify({ sourceHash: s.savedHash })));
-      s.writeEpoch += 1; s.saveState = conflict ? 'conflict' : 'draft-saved'; return conflict ? 2 : 0;
+      s.saveState = conflict ? 'conflict' : revision === s.mutationRevision ? 'draft-saved' : 'check-required'; return conflict ? 2 : 0;
     }
     if (!['storage-read-asset', 'storage-write-asset', 'storage-has-asset'].includes(method)) fail('METHOD_NOT_ALLOWED', `Opération de stockage inconnue : ${method}`);
     const key = payload?.path;

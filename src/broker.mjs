@@ -20,7 +20,7 @@ export async function startBroker({ token = randomUUID(), timeout, draftRoot } =
       for await (const chunk of req) { raw += chunk; if (raw.length > 40 * 1024 * 1024) throw new Error('Request too large'); }
       const { method, args = {} } = JSON.parse(raw);
       let result;
-      if (method === 'ping') result = { version: '0.3.0' };
+      if (method === 'ping') result = { version: '0.3.1' };
       else if (method === 'open' || method === 'new') {
         const filename = method === 'new' ? await createDocument(args.path) : args.path;
         result = await sessions.open(filename, args.scope);
@@ -55,7 +55,6 @@ export async function startBroker({ token = randomUUID(), timeout, draftRoot } =
         generation = config.generation;
         peer.send(JSON.stringify({ kind: 'config', ...config }));
       } catch (e) { peer.send(JSON.stringify({ kind: 'fatal', message: e.message })); peer.close(); return; }
-      let storageTail = Promise.resolve();
       peer.on('message', bytes => {
         try {
           const message = JSON.parse(bytes.toString());
@@ -82,12 +81,12 @@ export async function startBroker({ token = randomUUID(), timeout, draftRoot } =
             })();
           }
           else if (message.kind === 'storage') {
-            storageTail = storageTail.then(async () => {
+            void (async () => {
               try {
                 const payload = await sessions.storage(id, generation, message.method, message.payload);
                 peer.send(JSON.stringify({ kind: 'storage-response', id: message.id, payload })); broadcast(id);
               } catch (e) { if (peer.readyState === 1) peer.send(JSON.stringify({ kind: 'storage-response', id: message.id, error: { code: e.code ?? 'STORAGE_ERROR', message: e.message } })); }
-            }).catch(() => {});
+            })().catch(() => {});
           }
         } catch { peer.close(1008, 'Invalid message'); }
       });

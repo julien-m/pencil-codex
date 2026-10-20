@@ -36607,7 +36607,7 @@ async function connectBroker(directory = process.env.PLUGIN_DATA ?? path.join(ro
     try {
       const info2 = JSON.parse(await fs.readFile(connection, "utf8"));
       const response = await fetch(`http://127.0.0.1:${info2.port}/rpc`, { method: "POST", headers: { Authorization: `Bearer ${info2.token}` }, body: JSON.stringify({ method: "ping" }), signal: AbortSignal.timeout(1e3) });
-      if (!response.ok || (await response.json()).result?.version !== "0.3.0") return null;
+      if (!response.ok || (await response.json()).result?.version !== "0.3.1") return null;
       return info2;
     } catch {
       return null;
@@ -36652,7 +36652,7 @@ async function connectBroker(directory = process.env.PLUGIN_DATA ?? path.join(ro
 }
 
 // src/server.mjs
-var server = new McpServer({ name: "pencil-panel", version: "0.3.0" });
+var server = new McpServer({ name: "pencil-panel", version: "0.3.1" });
 var resource = "ui://pencil-panel/editor-v1.html";
 var defaultScope = process.env.CODEX_THREAD_ID ?? `client-${randomUUID()}`;
 var broker;

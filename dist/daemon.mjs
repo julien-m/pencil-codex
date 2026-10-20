@@ -3838,9 +3838,10 @@ var fail = (code, message) => {
   throw new SessionError(code, message);
 };
 var Sessions = class {
-  constructor({ timeout = 15e3, draftRoot = path2.join(os.tmpdir(), "pencil-panel-drafts") } = {}) {
+  constructor({ timeout = 15e3, saveWaitTimeout = 5e3, draftRoot = path2.join(os.tmpdir(), "pencil-panel-drafts") } = {}) {
     this.items = /* @__PURE__ */ new Map();
     this.timeout = timeout;
+    this.saveWaitTimeout = saveWaitTimeout;
     this.draftRoot = draftRoot;
   }
   get(id) {
@@ -3859,7 +3860,7 @@ var Sessions = class {
     }
     const id = randomUUID2();
     const draft = path2.join(this.draftRoot, `${digest(`${scope}:${file}`)}.pen`);
-    const s = { id, scope, file, draft, exportJobs: /* @__PURE__ */ new Map(), writeEpoch: 0, virtualRoot: `pencil/${id}/`, generation: 0, pending: /* @__PURE__ */ new Map(), agents: /* @__PURE__ */ new Map(), executions: /* @__PURE__ */ new Set(), blocked: false, connected: false, savedHash: null, operations: 0, saveState: "not-loaded" };
+    const s = { id, scope, file, draft, exportJobs: /* @__PURE__ */ new Map(), mutationRevision: 0, virtualRoot: `pencil/${id}/`, generation: 0, pending: /* @__PURE__ */ new Map(), agents: /* @__PURE__ */ new Map(), blocked: false, connected: false, savedHash: null, operations: 0, saveState: "not-loaded" };
     this.items.set(id, s);
     return this.status(id);
   }
@@ -3888,7 +3889,6 @@ var Sessions = class {
   acquire(id, agent) {
     const s = this.get(id);
     if (s.blocked) fail("OUTCOME_UNKNOWN", "Session bloqu\xE9e apr\xE8s un r\xE9sultat inconnu");
-    if (s.saving) fail("SAVE_IN_PROGRESS", "Enregistrement en cours");
     const token = randomUUID2();
     s.agents.set(token, { agent, calls: 0 });
     return { lease: token, ...this.status(id) };
@@ -3905,38 +3905,64 @@ var Sessions = class {
     const s = this.get(id), participant = s.agents.get(token);
     if (!participant) fail("INVALID_LEASE", "Participation requise avant les appels");
     if (s.blocked) fail("OUTCOME_UNKNOWN", "Session bloqu\xE9e ; ne pas rejouer les mutations");
-    if (s.saving) fail("SAVE_IN_PROGRESS", "Enregistrement en cours");
+    if (s.saving) {
+      participant.calls += 1;
+      this.onActivity?.(id);
+      let resumed = false;
+      return this.afterSave(id, () => {
+        participant.calls -= 1;
+        resumed = true;
+        return this.call(id, token, name, args, { observational });
+      }).finally(() => {
+        if (!resumed) participant.calls -= 1;
+        this.onActivity?.(id);
+      });
+    }
     if (!["execute", "read_skill", "get_style", "get_app_state"].includes(name)) fail("TOOL_NOT_ALLOWED", "Outil non expos\xE9 par ce plugin");
     if (name === "execute" && /\bGenerate\s*\(/.test(args.input ?? "")) fail("ASYNC_UNSUPPORTED", "La g\xE9n\xE9ration asynchrone n\u2019est pas prise en charge dans cette version");
     participant.calls += 1;
-    const writeEpoch = s.writeEpoch;
-    const execution = name === "execute" && !observational ? { overlapped: s.executions.size > 0 } : null;
-    if (execution) {
-      for (const other of s.executions) other.overlapped = true;
-      s.executions.add(execution);
-    }
+    const mutation = name === "execute" && !observational;
     let result;
     try {
       result = this.request(id, "mcp-tool-call", { name, arguments: args });
     } catch (error) {
       participant.calls -= 1;
-      if (execution) s.executions.delete(execution);
       throw error;
     }
     this.onActivity?.(id);
     return result.then((response) => {
       s.operations += 1;
-      if (execution && (execution.overlapped || s.writeEpoch === writeEpoch)) s.saveState = "check-required";
       return response;
     }).finally(() => {
       participant.calls -= 1;
-      if (execution) s.executions.delete(execution);
+      if (mutation) {
+        s.mutationRevision += 1;
+        if (s.saveState !== "conflict") s.saveState = "check-required";
+      }
       this.onActivity?.(id);
     });
   }
+  async afterSave(id, operation) {
+    const s = this.get(id), deadline = Date.now() + this.saveWaitTimeout;
+    while (s.saving) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) fail("SAVE_WAIT_TIMEOUT", "D\xE9lai d\u2019attente de sauvegarde d\xE9pass\xE9 ; aucun appel envoy\xE9");
+      const result = await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new SessionError("SAVE_WAIT_TIMEOUT", "D\xE9lai d\u2019attente de sauvegarde d\xE9pass\xE9 ; aucun appel envoy\xE9")), remaining);
+        s.saveFinished.then((value) => {
+          clearTimeout(timer);
+          resolve(value);
+        });
+      });
+      if (result.error) throw result.error;
+    }
+    if (s.blocked) fail("OUTCOME_UNKNOWN", "Session bloqu\xE9e ; ne pas rejouer les mutations");
+    return operation();
+  }
   request(id, method, payload) {
     const s = this.get(id);
-    if (s.saving && method !== "save") fail("SAVE_IN_PROGRESS", "Enregistrement en cours");
+    if (s.saving && method !== "save") return this.afterSave(id, () => this.request(id, method, payload));
+    if (s.blocked) fail("OUTCOME_UNKNOWN", "Session bloqu\xE9e ; ne pas rejouer les mutations");
     if (!s.connected) fail("EDITOR_OFFLINE", "Ouvrir le fichier .pen dans le panneau et attendre le moteur");
     const requestId = randomUUID2();
     return new Promise((resolve, reject) => {
@@ -4003,8 +4029,14 @@ var Sessions = class {
   }
   async save(id, token) {
     const s = this.get(id);
+    if (s.saving) return this.afterSave(id, () => this.save(id, token));
     if (!s.agents.has(token) || s.pending.size || [...s.agents.values()].some((a) => a.calls) || s.blocked || s.saving) fail("SAVE_NOT_READY", "Rejoindre la session et attendre la fin des op\xE9rations");
+    let finishSave, saveError;
+    s.saveFinished = new Promise((resolve) => {
+      finishSave = resolve;
+    });
     s.saving = true;
+    this.onActivity?.(id);
     try {
       const result = await this.request(id, "save");
       if (result !== 0 && result !== 1) fail("SAVE_NOT_READY", "Le moteur n\u2019a pas confirm\xE9 la sauvegarde");
@@ -4029,12 +4061,18 @@ var Sessions = class {
           throw error;
         }
       });
+    } catch (error) {
+      saveError = error;
+      throw error;
     } finally {
       s.saving = false;
+      finishSave({ error: saveError });
+      this.onActivity?.(id);
     }
   }
   async saveAs(id, token, filename) {
     const s = this.get(id);
+    if (s.saving) return this.afterSave(id, () => this.saveAs(id, token, filename));
     if (!s.agents.has(token) || s.pending.size || [...s.agents.values()].some((a) => a.calls) || s.blocked || s.saving) fail("SAVE_NOT_READY", "Rejoindre la session et attendre la fin des op\xE9rations");
     if (!["draft-saved", "source-saved", "conflict"].includes(s.saveState)) fail("SAVE_NOT_READY", "Attendre un acquittement de sauvegarde du moteur avant Enregistrer sous");
     if (path2.extname(filename).toLowerCase() !== ".pen") fail("INVALID_PATH", "Choisir un nouveau fichier .pen");
@@ -4048,9 +4086,10 @@ var Sessions = class {
     return result;
   }
   storage(id, generation, method, payload) {
-    return this.persist(this.get(id), () => this.storageNow(id, generation, method, payload));
+    const s = this.get(id), revision = s.mutationRevision;
+    return this.persist(s, () => this.storageNow(id, generation, method, payload, revision));
   }
-  async storageNow(id, generation, method, payload) {
+  async storageNow(id, generation, method, payload, revision) {
     const s = this.get(id);
     if (generation !== s.generation || !s.connected) fail("STALE_CHANNEL", "Canal p\xE9rim\xE9");
     if (method === "documents-save-preview") return null;
@@ -4086,8 +4125,7 @@ var Sessions = class {
       await fs2.mkdir(this.draftRoot, { recursive: true, mode: 448 });
       await this.atomicWrite(s.draft, Buffer.from(payload.content));
       await this.atomicWrite(`${s.draft}.baseline`, Buffer.from(JSON.stringify({ sourceHash: s.savedHash })));
-      s.writeEpoch += 1;
-      s.saveState = conflict ? "conflict" : "draft-saved";
+      s.saveState = conflict ? "conflict" : revision === s.mutationRevision ? "draft-saved" : "check-required";
       return conflict ? 2 : 0;
     }
     if (!["storage-read-asset", "storage-write-asset", "storage-has-asset"].includes(method)) fail("METHOD_NOT_ALLOWED", `Op\xE9ration de stockage inconnue : ${method}`);
@@ -4175,7 +4213,7 @@ async function startBroker({ token = randomUUID3(), timeout, draftRoot } = {}) {
       }
       const { method, args = {} } = JSON.parse(raw);
       let result;
-      if (method === "ping") result = { version: "0.3.0" };
+      if (method === "ping") result = { version: "0.3.1" };
       else if (method === "open" || method === "new") {
         const filename = method === "new" ? await createDocument(args.path) : args.path;
         result = await sessions.open(filename, args.scope);
@@ -4232,7 +4270,6 @@ async function startBroker({ token = randomUUID3(), timeout, draftRoot } = {}) {
         peer.close();
         return;
       }
-      let storageTail = Promise.resolve();
       peer.on("message", (bytes) => {
         try {
           const message = JSON.parse(bytes.toString());
@@ -4260,7 +4297,7 @@ async function startBroker({ token = randomUUID3(), timeout, draftRoot } = {}) {
               }
             })();
           } else if (message.kind === "storage") {
-            storageTail = storageTail.then(async () => {
+            void (async () => {
               try {
                 const payload = await sessions.storage(id, generation, message.method, message.payload);
                 peer.send(JSON.stringify({ kind: "storage-response", id: message.id, payload }));
@@ -4268,7 +4305,7 @@ async function startBroker({ token = randomUUID3(), timeout, draftRoot } = {}) {
               } catch (e) {
                 if (peer.readyState === 1) peer.send(JSON.stringify({ kind: "storage-response", id: message.id, error: { code: e.code ?? "STORAGE_ERROR", message: e.message } }));
               }
-            }).catch(() => {
+            })().catch(() => {
             });
           }
         } catch {

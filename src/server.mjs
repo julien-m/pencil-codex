@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { connectBroker, root } from './client.mjs';
 
-const server = new McpServer({ name: 'pencil-panel', version: '0.3.0' });
+const server = new McpServer({ name: 'pencil-panel', version: '0.3.1' });
 const resource = 'ui://pencil-panel/editor-v1.html';
 const defaultScope = process.env.CODEX_THREAD_ID ?? `client-${randomUUID()}`;
 let broker;
