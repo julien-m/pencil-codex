@@ -29,6 +29,7 @@ test('the editor Save button flushes over WebSocket and publishes the opened fil
     const file = path.join(dir, 'design.pen'); await fs.writeFile(file, 'before');
     const response = await fetch(`http://127.0.0.1:${b.port}/rpc`, { method: 'POST', headers: { Authorization: `Bearer ${b.token}` }, body: JSON.stringify({ method: 'open', args: { path: file, scope: 'ui-save' } }) });
     const { result: session } = await response.json();
+    b.sessions.acquire(session.sessionId, 'Idle collaborator');
     peer = new WebSocket(`ws://127.0.0.1:${b.port}/editor?session=${session.sessionId}&token=${session.editorToken}`);
     let saveRequest, schemaConflict;
     const saved = new Promise((resolve, reject) => {
@@ -55,6 +56,38 @@ test('the editor Save button flushes over WebSocket and publishes the opened fil
     assert.equal(await fs.readFile(file, 'utf8'), 'after');
     assert.equal(await fs.readFile(result.result.backupPath, 'utf8'), 'before');
     assert.equal(schemaConflict.error.code, 'SAVE_IN_PROGRESS');
-    assert.equal(b.sessions.status(session.sessionId).leaseOwner, null);
+    assert.deepEqual(b.sessions.status(session.sessionId).agents,[{agent:'Idle collaborator',activeCalls:0}]);
   } finally { peer?.terminate(); await b.close(); await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test('one editor receives concurrent calls from two agents and routes out-of-order responses', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pencil-shared-ws-'));
+  const b = await startBroker({timeout:500}); let peer;
+  try {
+    const rpc = async (method,args) => {
+      const body = await (await fetch(`http://127.0.0.1:${b.port}/rpc`, {method:'POST',headers:{Authorization:`Bearer ${b.token}`},body:JSON.stringify({method,args})})).json();
+      if(body.error) throw Object.assign(new Error(body.error.message),body.error);
+      return body.result;
+    };
+    const file=path.join(dir,'shared.pen'); await fs.writeFile(file,'opaque');
+    const session=await rpc('open',{path:file,scope:'shared'});
+    await assert.rejects(rpc('open',{path:file,scope:'other'}),{code:'DOCUMENT_BUSY'});
+    const requests=[], activity=[];
+    peer=new WebSocket(`ws://127.0.0.1:${b.port}/editor?session=${session.sessionId}&token=${session.editorToken}`);
+    await new Promise((resolve,reject)=>{peer.once('message',resolve);peer.once('error',reject)});
+    peer.on('message',raw=>{
+      const m=JSON.parse(raw);
+      if(m.kind==='activity') activity.push(m.status);
+      if(m.kind!=='request')return;
+      requests.push(m);
+      // Reply only after BOTH requests arrive. A serial broker would time out.
+      if(requests.length===2) for(const request of [...requests].reverse()) peer.send(JSON.stringify({kind:'response',id:request.id,payload:request.payload.arguments}));
+    });
+    const [a,c]=await Promise.all(['A','B'].map(agent=>rpc('acquire',{sessionId:session.sessionId,agent})));
+    const results=await Promise.all([a,c].map((participant,i)=>rpc('call',{sessionId:session.sessionId,lease:participant.lease,tool:'execute',arguments:{input:`Print(${i})`,marker:i}})));
+    assert.deepEqual(results.map(r=>r.marker),[0,1]);
+    assert(activity.some(s=>s.agents.length===2 && s.activeCalls===2));
+    await Promise.all([a,c].map(p=>rpc('release',{sessionId:session.sessionId,lease:p.lease})));
+    assert.deepEqual(b.sessions.status(session.sessionId).agents,[]);
+  } finally {peer?.terminate();await b.close();await fs.rm(dir,{recursive:true,force:true})}
 });

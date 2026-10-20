@@ -29,8 +29,9 @@ function start(editor) {
   socket.onmessage = event => {
     const m = JSON.parse(event.data);
     if (m.kind === 'activity') {
-      document.querySelector('#activity').textContent = m.status.leaseOwner ? `● ${m.status.leaseOwner} travaille sur ce document` : 'Agents disponibles · document libre';
-      saveButton.disabled = !connected || !!m.status.leaseOwner || m.status.blocked;
+      const agents = m.status.agents ?? [];
+      document.querySelector('#activity').textContent = agents.length ? agents.map(a => `● ${a.agent}${a.activeCalls ? ' · en cours' : ' · prêt'}`).join('   |   ') : 'Session partagée · aucun agent connecté';
+      saveButton.disabled = !connected || m.status.activeCalls > 0 || m.status.saving || m.status.blocked;
       return;
     }
     if (m.kind === 'save-result') {
@@ -66,7 +67,7 @@ frame.src = 'https://app.pen.dev/new?embed';
 window.pencilPanelState = 'loading';
 if (window.pencilPanelPreview) start(window.pencilPanelPreview);
 else {
-  app = new App({ name: 'Pencil', version: '0.2.0' }, { availableDisplayModes: ['fullscreen'] });
+  app = new App({ name: 'Pencil', version: '0.3.0' }, { availableDisplayModes: ['fullscreen'] });
   app.ontoolresult = result => { if (result._meta?.editor) start(result._meta.editor); };
   app.connect().catch(e => show(`Hôte MCP Apps : ${e.message}`));
 }

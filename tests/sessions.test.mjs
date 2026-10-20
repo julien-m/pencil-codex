@@ -13,22 +13,47 @@ describe('session routing and reservations', () => {
     expect((await r.open(path.join(dir, 'b.pen'), 'thread-b')).sessionId).not.toBe(a.sessionId);
     await expect(r.open(path.join(dir, 'a.pen'), 'thread-b')).rejects.toMatchObject({ code: 'DOCUMENT_BUSY' });
   });
-  test('two agents cannot interleave a reserved sequence; next agent reads after release', async () => {
+  test('two agents join one document without excluding each other', async () => {
     const r = new Sessions({draftRoot: path.join(dir, 'drafts')}); const { sessionId: id } = await r.open(path.join(dir, 'a.pen'), 's');
-    const first = r.acquire(id, 'A'); expect(() => r.acquire(id, 'B')).toThrow('réservé');
-    r.release(id, first.lease); expect(r.acquire(id, 'B').leaseOwner).toBe('B');
-    expect(() => r.call(id, first.lease, 'execute', { input: '' })).toThrow('Réserver');
+    const first = r.acquire(id, 'A'); const second = r.acquire(id, 'B');
+    expect(first.lease).not.toBe(second.lease);
+    expect(r.status(id).agents.map(x => x.agent)).toEqual(['A', 'B']);
+    r.release(id, first.lease); expect(r.status(id).agents.map(x => x.agent)).toEqual(['B']);
+    expect(() => r.call(id, first.lease, 'execute', { input: '' })).toThrow('Participation');
+    r.release(id, second.lease);
   });
-  test('calls serialize within one channel and preserve their responses', async () => {
+  test('dispatches both agent calls before either reply and correlates reversed replies', async () => {
     const r = new Sessions({draftRoot: path.join(dir, 'drafts')}); const { sessionId: id } = await r.open(path.join(dir, 'a.pen'), 's'); const requests = [];
-    const { generation } = r.attach(id, m => requests.push(m)); const { lease } = r.acquire(id, 'A');
-    const a = r.call(id, lease, 'get_app_state'); const b = r.call(id, lease, 'get_app_state');
-    await new Promise(r => setTimeout(r, 5)); expect(requests).toHaveLength(1);
-    expect(() => r.release(id, lease)).toThrow('cours');
-    r.reply(id, generation, { id: requests[0].id, payload: { content: [{ type: 'text', text: 'A' }] } }); await a;
-    await new Promise(r => setTimeout(r, 5)); expect(requests).toHaveLength(2);
-    r.reply(id, generation, { id: requests[1].id, payload: { content: [{ type: 'text', text: 'B' }] } });
-    expect((await b).content[0].text).toBe('B');
+    const { generation } = r.attach(id, m => requests.push(m));
+    const a = r.acquire(id, 'A'); const b = r.acquire(id, 'B');
+    const first = r.call(id, a.lease, 'execute', {input: 'Print("A")'});
+    const second = r.call(id, b.lease, 'execute', {input: 'Print("B")'});
+    expect(requests).toHaveLength(2);
+    expect(r.status(id).activeCalls).toBe(2);
+    expect(() => r.release(id, a.lease)).toThrow('cours');
+    await expect(r.save(id, a.lease)).rejects.toMatchObject({code:'SAVE_NOT_READY'});
+    r.reply(id, generation, {id:requests[1].id, payload:{content:[{type:'text',text:'B'}]}});
+    expect((await second).content[0].text).toBe('B');
+    r.release(id, b.lease);
+    expect(r.status(id).agents.map(x => x.agent)).toEqual(['A']);
+    r.reply(id, generation, {id:requests[0].id,payload:{content:[{type:'text',text:'A'}]}});
+    expect((await first).content[0].text).toBe('A');
+    r.release(id, a.lease);
+    expect(r.status(id).activeCalls).toBe(0);
+  });
+  test('one agent snapshot cannot acknowledge another concurrent mutation', async () => {
+    const r = new Sessions({draftRoot:path.join(dir,'drafts')}); const {sessionId:id}=await r.open(path.join(dir,'a.pen'),'s'); const requests=[];
+    const {generation,fileURI}=r.attach(id,m=>requests.push(m)); await r.storage(id,generation,'storage-load');
+    const a=r.acquire(id,'A'), b=r.acquire(id,'B');
+    const first=r.call(id,a.lease,'execute',{input:'Insert A'}), second=r.call(id,b.lease,'execute',{input:'Insert B'});
+    await r.storage(id,generation,'storage-write',{fileURI,content:'only-A'});
+    r.reply(id,generation,{id:requests[0].id,payload:{}}); await first;
+    r.reply(id,generation,{id:requests[1].id,payload:{}}); await second;
+    expect(r.status(id).saveState).toBe('check-required');
+    await expect(r.saveAs(id,b.lease,path.join(dir,'stale.pen'))).rejects.toMatchObject({code:'SAVE_NOT_READY'});
+    await r.storage(id,generation,'storage-write',{fileURI,content:'both-A-and-B'});
+    await r.saveAs(id,b.lease,path.join(dir,'fresh.pen'));
+    expect(await fs.readFile(path.join(dir,'fresh.pen'),'utf8')).toBe('both-A-and-B');
   });
   test('timeout blocks writes and lease release instead of retrying', async () => {
     const r = new Sessions({ timeout: 15, draftRoot: path.join(dir, 'drafts') }); const { sessionId: id } = await r.open(path.join(dir, 'a.pen'), 's');

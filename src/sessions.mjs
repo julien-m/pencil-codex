@@ -26,13 +26,13 @@ export class Sessions {
     }
     const id = randomUUID();
     const draft = path.join(this.draftRoot, `${digest(`${scope}:${file}`)}.pen`);
-    const s = { id, scope, file, draft, exportJobs: new Map(), writeEpoch: 0, virtualRoot: `pencil/${id}/`, generation: 0, pending: new Map(), lease: null, tail: Promise.resolve(), blocked: false, connected: false, savedHash: null, operations: 0, saveState: 'not-loaded' };
+    const s = { id, scope, file, draft, exportJobs: new Map(), writeEpoch: 0, virtualRoot: `pencil/${id}/`, generation: 0, pending: new Map(), agents: new Map(), executions: new Set(), blocked: false, connected: false, savedHash: null, operations: 0, saveState: 'not-loaded' };
     this.items.set(id, s);
     return this.status(id);
   }
   status(id) {
     const s = this.get(id);
-    return { sessionId: s.id, scope: s.scope, name: path.basename(s.file), connected: s.connected, generation: s.generation, blocked: s.blocked, leaseOwner: s.lease?.agent ?? null, operations: s.operations, saveState: s.saveState, draftPath: s.draft };
+    return { sessionId: s.id, scope: s.scope, name: path.basename(s.file), connected: s.connected, generation: s.generation, blocked: s.blocked, leaseOwner: [...s.agents.values()].map(a => a.agent).join(', ') || null, agents: [...s.agents.values()].map(a => ({ agent: a.agent, activeCalls: a.calls })), activeCalls: [...s.agents.values()].reduce((n, a) => n + a.calls, 0), saving: !!s.saving, operations: s.operations, saveState: s.saveState, draftPath: s.draft };
   }
   attach(id, send) {
     const s = this.get(id);
@@ -52,37 +52,44 @@ export class Sessions {
   acquire(id, agent) {
     const s = this.get(id);
     if (s.blocked) fail('OUTCOME_UNKNOWN', 'Session bloquée après un résultat inconnu');
-    if (s.lease) fail('LEASE_BUSY', `Document réservé par ${s.lease.agent}`);
-    s.lease = { token: randomUUID(), agent };
-    return { lease: s.lease.token, ...this.status(id) };
+    if (s.saving) fail('SAVE_IN_PROGRESS', 'Enregistrement en cours');
+    // The legacy lease field is now a non-exclusive participation token.
+    const token = randomUUID();
+    s.agents.set(token, { agent, calls: 0 });
+    return { lease: token, ...this.status(id) };
   }
   release(id, token) {
-    const s = this.get(id);
-    if (s.lease?.token !== token) fail('INVALID_LEASE', 'Réservation invalide');
-    if (s.pending.size || s.queued || s.saving) fail('CALLS_IN_FLIGHT', 'Des appels restent en cours');
-    if (s.blocked) fail('OUTCOME_UNKNOWN', 'Ne pas libérer une réservation avec une opération inconnue');
-    s.lease = null;
+    const s = this.get(id), participant = s.agents.get(token);
+    if (!participant) fail('INVALID_LEASE', 'Participation invalide');
+    if (participant.calls || s.saving) fail('CALLS_IN_FLIGHT', 'Des appels restent en cours');
+    if (s.blocked) fail('OUTCOME_UNKNOWN', 'Ne pas terminer une participation avec une opération inconnue');
+    s.agents.delete(token);
     return this.status(id);
   }
   call(id, token, name, args = {}, { observational = false } = {}) {
-    const s = this.get(id);
-    if (s.lease?.token !== token) fail('INVALID_LEASE', 'Réserver le document avant les appels');
+    const s = this.get(id), participant = s.agents.get(token);
+    if (!participant) fail('INVALID_LEASE', 'Participation requise avant les appels');
+    if (s.blocked) fail('OUTCOME_UNKNOWN', 'Session bloquée ; ne pas rejouer les mutations');
     if (s.saving) fail('SAVE_IN_PROGRESS', 'Enregistrement en cours');
     if (!['execute', 'read_skill', 'get_style', 'get_app_state'].includes(name)) fail('TOOL_NOT_ALLOWED', 'Outil non exposé par ce plugin');
-    // Generation and execution are mixed in execute; async generation is excluded from v0.1.
     if (name === 'execute' && /\bGenerate\s*\(/.test(args.input ?? '')) fail('ASYNC_UNSUPPORTED', 'La génération asynchrone n’est pas prise en charge dans cette version');
-    s.queued = (s.queued ?? 0) + 1;
-    const result = s.tail.then(async () => {
-      if (s.blocked) fail('OUTCOME_UNKNOWN', 'Session bloquée ; ne pas rejouer les mutations');
-      if (s.lease?.token !== token) fail('INVALID_LEASE', 'Réservation périmée');
-      const writeEpoch = s.writeEpoch;
-      const response = await this.request(id, 'mcp-tool-call', { name, arguments: args });
+    participant.calls += 1;
+    const writeEpoch = s.writeEpoch;
+    const execution = name === 'execute' && !observational ? { overlapped: s.executions.size > 0 } : null;
+    if (execution) {
+      for (const other of s.executions) other.overlapped = true;
+      s.executions.add(execution);
+    }
+    // Dispatch immediately: each request has its own response ID, no document queue.
+    let result;
+    try { result = this.request(id, 'mcp-tool-call', { name, arguments: args }); }
+    catch (error) { participant.calls -= 1; if (execution) s.executions.delete(execution); throw error; }
+    this.onActivity?.(id);
+    return result.then(response => {
       s.operations += 1;
-      if (name === 'execute' && !observational && s.writeEpoch === writeEpoch) s.saveState = 'check-required';
+      if (execution && (execution.overlapped || s.writeEpoch === writeEpoch)) s.saveState = 'check-required';
       return response;
-    });
-    s.tail = result.catch(() => {});
-    return result.finally(() => { s.queued -= 1; });
+    }).finally(() => { participant.calls -= 1; if (execution) s.executions.delete(execution); this.onActivity?.(id); });
   }
   request(id, method, payload) {
     const s = this.get(id);
@@ -137,7 +144,7 @@ export class Sessions {
   }
   async save(id, token) {
     const s = this.get(id);
-    if (s.lease?.token !== token || s.pending.size || s.queued || s.blocked || s.saving) fail('SAVE_NOT_READY', 'Réserver la session et attendre la fin des opérations');
+    if (!s.agents.has(token) || s.pending.size || [...s.agents.values()].some(a => a.calls) || s.blocked || s.saving) fail('SAVE_NOT_READY', 'Rejoindre la session et attendre la fin des opérations');
     s.saving = true;
     try {
       // Ask the engine to flush its current content, including unsaved manual edits.
@@ -163,7 +170,7 @@ export class Sessions {
   }
   async saveAs(id, token, filename) {
     const s = this.get(id);
-    if (s.lease?.token !== token || s.pending.size || s.queued || s.blocked || s.saving) fail('SAVE_NOT_READY', 'Réserver la session et attendre la fin des opérations');
+    if (!s.agents.has(token) || s.pending.size || [...s.agents.values()].some(a => a.calls) || s.blocked || s.saving) fail('SAVE_NOT_READY', 'Rejoindre la session et attendre la fin des opérations');
     if (!['draft-saved', 'source-saved', 'conflict'].includes(s.saveState)) fail('SAVE_NOT_READY', 'Attendre un acquittement de sauvegarde du moteur avant Enregistrer sous');
     if (path.extname(filename).toLowerCase() !== '.pen') fail('INVALID_PATH', 'Choisir un nouveau fichier .pen');
     const saved = await writeNewFile(filename, await fs.readFile(s.draft));

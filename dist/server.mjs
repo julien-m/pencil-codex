@@ -36607,7 +36607,7 @@ async function connectBroker(directory = process.env.PLUGIN_DATA ?? path.join(ro
     try {
       const info2 = JSON.parse(await fs.readFile(connection, "utf8"));
       const response = await fetch(`http://127.0.0.1:${info2.port}/rpc`, { method: "POST", headers: { Authorization: `Bearer ${info2.token}` }, body: JSON.stringify({ method: "ping" }), signal: AbortSignal.timeout(1e3) });
-      if (!response.ok || (await response.json()).result?.version !== "0.2.0") return null;
+      if (!response.ok || (await response.json()).result?.version !== "0.3.0") return null;
       return info2;
     } catch {
       return null;
@@ -36652,7 +36652,7 @@ async function connectBroker(directory = process.env.PLUGIN_DATA ?? path.join(ro
 }
 
 // src/server.mjs
-var server = new McpServer({ name: "pencil-panel", version: "0.2.0" });
+var server = new McpServer({ name: "pencil-panel", version: "0.3.0" });
 var resource = "ui://pencil-panel/editor-v1.html";
 var defaultScope = process.env.CODEX_THREAD_ID ?? `client-${randomUUID()}`;
 var broker;
@@ -36684,16 +36684,16 @@ server.registerTool("pencil_open", {
 var id = external_exports.string().uuid();
 server.registerTool("pencil_new", { description: "Cr\xE9er un nouveau fichier .pen au chemin absolu choisi, sans \xE9craser de fichier existant, puis ouvrir sa vue Pencil.", inputSchema: { path: external_exports.string(), scope: external_exports.string().optional() }, _meta: { ui: { resourceUri: resource } } }, wrap((args) => open2(args.path, args.scope, "new")));
 var selection = { sessionId: id, lease: id, nodeIds: external_exports.array(external_exports.string().min(1)).min(1).max(20), directory: external_exports.string().min(1) };
-server.registerTool("pencil_save", { description: "Enregistrer les modifications dans le fichier .pen ouvert. Demande au moteur de vider ses changements, conserve une version de r\xE9cup\xE9ration et refuse un conflit externe. R\xE9servation requise.", inputSchema: { sessionId: id, lease: id }, annotations: { readOnlyHint: false, destructiveHint: true } }, wrap(async (args) => object3(await (await backend()).rpc("save", args))));
+server.registerTool("pencil_save", { description: "Enregistrer les modifications dans le fichier .pen ouvert. Demande au moteur de vider ses changements, conserve une version de r\xE9cup\xE9ration et refuse un conflit externe. Participation \xE0 la session requise.", inputSchema: { sessionId: id, lease: id }, annotations: { readOnlyHint: false, destructiveHint: true } }, wrap(async (args) => object3(await (await backend()).rpc("save", args))));
 server.registerTool("pencil_capture", { description: 'Capturer des composants ou vues par ID natif, ou ["document"] pour tout le projet. Produit des images PNG et les enregistre dans le dossier absolu choisi. Aucun \xE9crasement.', inputSchema: selection }, wrap(async (args) => (await backend()).rpc("capture", args)));
-server.registerTool("pencil_export", { description: "Exporter les n\u0153uds s\xE9lectionn\xE9s vers PNG/JPEG/WEBP/PDF/HTML dans le dossier absolu choisi. Le r\xE9sultat contient les fichiers r\xE9ellement \xE9crits. R\xE9servation requise ; aucun \xE9crasement.", inputSchema: { ...selection, format: external_exports.enum(["png", "jpeg", "webp", "pdf", "html-css", "html-tailwind"]) } }, wrap(async (args) => (await backend()).rpc("export", args)));
+server.registerTool("pencil_export", { description: "Exporter les n\u0153uds s\xE9lectionn\xE9s vers PNG/JPEG/WEBP/PDF/HTML dans le dossier absolu choisi. Le r\xE9sultat contient les fichiers r\xE9ellement \xE9crits. Participation \xE0 la session requise ; aucun \xE9crasement.", inputSchema: { ...selection, format: external_exports.enum(["png", "jpeg", "webp", "pdf", "html-css", "html-tailwind"]) } }, wrap(async (args) => (await backend()).rpc("export", args)));
 server.registerTool("pencil_save_as", { description: "Enregistrer le dernier snapshot acquitt\xE9 dans un NOUVEAU fichier .pen au chemin choisi. Utiliser un snapshot acquitt\xE9 (draft-saved, source-saved ou conflict) dans pencil_status ; aucun \xE9crasement ni basculement implicite de document.", inputSchema: { sessionId: id, lease: id, path: external_exports.string() } }, wrap(async (args) => object3(await (await backend()).rpc("save-as", args))));
 server.registerTool("pencil_tools", { description: "D\xE9couvrir les sch\xE9mas natifs publi\xE9s par le moteur de cette session ; respecter ces sch\xE9mas avant pencil_call.", inputSchema: { sessionId: id }, annotations: { readOnlyHint: true } }, wrap(async (args) => object3(await (await backend()).rpc("schema", args))));
-server.registerTool("pencil_status", { description: "V\xE9rifier le document, le canal, la sauvegarde et la r\xE9servation de cette session Pencil.", inputSchema: { sessionId: id }, annotations: { readOnlyHint: true } }, wrap(async (args) => object3(await (await backend()).rpc("status", args))));
-server.registerTool("pencil_begin", { description: "R\xE9server le document partag\xE9 pour une courte s\xE9quence lecture-modification-v\xE9rification. LEASE_BUSY signifie attendre puis relire ; aucun verrou implicite bas\xE9 sur le focus.", inputSchema: { sessionId: id, agent: external_exports.string().min(1).max(200) } }, wrap(async (args) => object3(await (await backend()).rpc("acquire", args))));
+server.registerTool("pencil_status", { description: "V\xE9rifier le document, le canal, la sauvegarde et les agents de cette session Pencil.", inputSchema: { sessionId: id }, annotations: { readOnlyHint: true } }, wrap(async (args) => object3(await (await backend()).rpc("status", args))));
+server.registerTool("pencil_begin", { description: "Rejoindre la session comme agent. Retourne lease, un jeton de participation NON exclusif : plusieurs agents peuvent travailler simultan\xE9ment dans le m\xEAme sessionId. Chaque agent modifie sa propre frame pour \xE9viter les conflits. Une autre session ne peut pas ouvrir le m\xEAme document.", inputSchema: { sessionId: id, agent: external_exports.string().min(1).max(200) } }, wrap(async (args) => object3(await (await backend()).rpc("acquire", args))));
 server.registerTool("pencil_call", {
-  description: "Appeler les outils natifs Pencil via le canal de la session r\xE9serv\xE9e. Commencer par read_skill puis get_app_state. Pr\xE9server sessionId et lease du lot. Les g\xE9n\xE9rations asynchrones ne sont pas support\xE9es dans v0.1 ; un OUTCOME_UNKNOWN interdit de rejouer la mutation.",
+  description: "Appeler les outils natifs Pencil via le canal de la session partag\xE9e. Commencer par read_skill puis get_app_state. Partager sessionId et utiliser son propre lease de participation. Les appels sont transmis imm\xE9diatement sans file globale ; ne pas modifier les n\u0153uds d\u2019un autre agent. Les g\xE9n\xE9rations asynchrones ne sont pas support\xE9es dans v0.1 ; un OUTCOME_UNKNOWN interdit de rejouer la mutation.",
   inputSchema: { sessionId: id, lease: id, tool: external_exports.enum(["execute", "get_app_state", "get_style", "read_skill"]), arguments: external_exports.record(external_exports.string(), external_exports.unknown()).default({}) }
 }, wrap(async (args) => (await backend()).rpc("call", args)));
-server.registerTool("pencil_end", { description: "Lib\xE9rer la r\xE9servation apr\xE8s relecture. Ne prouve pas la sauvegarde ; v\xE9rifier pencil_status et le fichier via le moteur.", inputSchema: { sessionId: id, lease: id } }, wrap(async (args) => object3(await (await backend()).rpc("release", args))));
+server.registerTool("pencil_end", { description: "Terminer sa participation apr\xE8s la fin de ses appels, sans interrompre les autres agents. Ne prouve pas la sauvegarde ; v\xE9rifier pencil_status et le fichier via le moteur.", inputSchema: { sessionId: id, lease: id } }, wrap(async (args) => object3(await (await backend()).rpc("release", args))));
 await server.connect(new StdioServerTransport());

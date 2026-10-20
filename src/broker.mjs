@@ -20,7 +20,7 @@ export async function startBroker({ token = randomUUID(), timeout, draftRoot } =
       for await (const chunk of req) { raw += chunk; if (raw.length > 40 * 1024 * 1024) throw new Error('Request too large'); }
       const { method, args = {} } = JSON.parse(raw);
       let result;
-      if (method === 'ping') result = { version: '0.2.0' };
+      if (method === 'ping') result = { version: '0.3.0' };
       else if (method === 'open' || method === 'new') {
         const filename = method === 'new' ? await createDocument(args.path) : args.path;
         result = await sessions.open(filename, args.scope);
@@ -41,6 +41,7 @@ export async function startBroker({ token = randomUUID(), timeout, draftRoot } =
   });
   const ws = new WebSocketServer({ noServer: true, maxPayload: 40 * 1024 * 1024 });
   const broadcast = id => { for (const peer of ws.clients) if (peer.sessionId === id && peer.readyState === 1) peer.send(JSON.stringify({ kind: 'activity', status: sessions.status(id) })); };
+  sessions.onActivity = broadcast;
   server.on('upgrade', (req, socket, head) => {
     let url;
     try { url = new URL(req.url, 'http://localhost'); } catch { socket.destroy(); return; }

@@ -26,6 +26,14 @@ try {
   assert(opened.structuredContent.sessionId); assert(opened._meta.editor.editorToken); assert(!JSON.stringify(opened.structuredContent).includes('editorToken'));
   const status = await client.callTool({ name: 'pencil_status', arguments: { sessionId: opened.structuredContent.sessionId } });
   assert.equal(status.structuredContent.connected, false);
+  const sessionId=opened.structuredContent.sessionId;
+  const participants=await Promise.all(['A','B'].map(agent=>client.callTool({name:'pencil_begin',arguments:{sessionId,agent}})));
+  assert(participants.every(p=>!p.isError));
+  const shared=await client.callTool({name:'pencil_status',arguments:{sessionId}});
+  assert.equal(shared.structuredContent.agents.length,2);
+  const denied=await client.callTool({name:'pencil_open',arguments:{path:file,scope:'different-session'}});
+  assert(denied.isError && denied.content[0].text.includes('DOCUMENT_BUSY'));
+  await Promise.all(participants.map(p=>client.callTool({name:'pencil_end',arguments:{sessionId,lease:p.structuredContent.lease}})));
   console.log('MCP stdio: tool-driven opening, UI resource/CSP, session open/status passed');
 } finally {
   clearTimeout(timer); await client.close();

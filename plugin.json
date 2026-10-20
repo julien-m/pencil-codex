@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "pencil",
-  "version": "0.2.0",
-  "description": "Éditeur Pencil sans chat pour les fichiers .pen, avec canal par session et réservation multi-agent.",
+  "version": "0.3.0",
+  "description": "Éditeur Pencil sans chat pour les fichiers .pen, avec canal par session et collaboration multi-agent.",
   "author": {
     "name": "Julien M"
   },
