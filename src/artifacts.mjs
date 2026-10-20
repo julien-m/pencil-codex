@@ -1,6 +1,33 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
+
+const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+// Keep the exact displaced inode, then publish without replacing any new writer.
+// Node has no portable filesystem compare-and-swap: the source path is briefly
+// absent. A competing file creation wins; both our draft and the backup survive.
+export async function replaceDocument(filename, bytes, expectedHash, io = fs) {
+  const conflict = backup => Object.assign(new Error(`Le fichier a changé. Brouillon conservé${backup ? ` ; version précédente : ${backup}` : ''}`), { code: 'SAVE_CONFLICT', backupPath: backup });
+  if (!(await io.lstat(filename)).isFile() || hash(await io.readFile(filename)) !== expectedHash) throw conflict();
+  const recovery = await io.mkdtemp(path.join(path.dirname(filename), '.pencil-save-'));
+  const backup = path.join(recovery, 'previous.pen'), pending = path.join(recovery, 'pending.pen');
+  let claimed = false, published = false;
+  try {
+    const handle = await io.open(pending, 'wx', 0o600);
+    try { await handle.writeFile(bytes); await handle.sync(); } finally { await handle.close(); }
+    await io.rename(filename, backup); claimed = true;
+    if (!(await io.lstat(backup)).isFile() || hash(await io.readFile(backup)) !== expectedHash) throw conflict(backup);
+    try { await io.link(pending, filename); published = true; }
+    catch (error) { if (error.code === 'EEXIST') throw conflict(backup); throw error; }
+    if (hash(await io.readFile(filename)) !== hash(bytes)) throw conflict(backup);
+    return { path: filename, backupPath: backup };
+  } finally {
+    if (claimed && !published) await io.link(backup, filename).catch(() => {});
+    // After a failed publication preserve pending as an additional recovery copy.
+    if (published) await io.unlink(pending).catch(() => {});
+    if (!claimed) await io.rm(recovery, { recursive: true, force: true }).catch(() => {});
+  }
+}
 
 export async function writeNewFile(filename, bytes) {
   if (!path.isAbsolute(filename)) throw new Error('Choisir un chemin absolu');

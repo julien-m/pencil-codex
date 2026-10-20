@@ -1,6 +1,7 @@
 import { App } from '@modelcontextprotocol/ext-apps';
 const status = document.querySelector('#status');
 const frame = document.querySelector('iframe');
+const saveButton = document.querySelector('#save');
 let socket, port, connected = false, frameLoaded = false, config, timer, started = false;
 let app;
 const show = message => { status.textContent = message; };
@@ -10,7 +11,7 @@ function connectEditor() {
   const channel = new MessageChannel(); port = channel.port1;
   port.onmessage = event => {
     const m = event.data;
-    if (m.kind === 'ready') { connected = true; clearInterval(timer); show('Canal connecté · chargement du moteur'); window.pencilPanelState = 'bridge-ready'; return; }
+    if (m.kind === 'ready') { connected = true; saveButton.disabled = false; clearInterval(timer); show('Canal connecté · chargement du moteur'); window.pencilPanelState = 'bridge-ready'; return; }
     if (m.kind === 'error') { show(`Pencil : ${m.message}`); return; }
     if (m.kind === 'request') {
       const payload = m.payload;
@@ -29,6 +30,11 @@ function start(editor) {
     const m = JSON.parse(event.data);
     if (m.kind === 'activity') {
       document.querySelector('#activity').textContent = m.status.leaseOwner ? `● ${m.status.leaseOwner} travaille sur ce document` : 'Agents disponibles · document libre';
+      saveButton.disabled = !connected || !!m.status.leaseOwner || m.status.blocked;
+      return;
+    }
+    if (m.kind === 'save-result') {
+      show(m.error ? `Enregistrement refusé : ${m.error.message}` : 'Modifications enregistrées dans le fichier .pen');
       return;
     }
     if (m.kind === 'fatal') { show(m.message); return; }
@@ -47,15 +53,20 @@ function start(editor) {
       port?.postMessage({ ...m, kind: 'response' });
     }
   };
-  socket.onclose = () => { clearInterval(timer); port?.close(); show('Canal déconnecté · ne pas rejouer les modifications'); };
+  socket.onclose = () => { saveButton.disabled = true; clearInterval(timer); port?.close(); show('Canal déconnecté · ne pas rejouer les modifications'); };
   socket.onerror = () => show('Canal local inaccessible dans cet hôte');
 }
+saveButton.addEventListener('click', () => {
+  if (!connected || socket?.readyState !== 1) return;
+  saveButton.disabled = true; show('Enregistrement du fichier…');
+  socket.send(JSON.stringify({ kind: 'save' }));
+});
 frame.addEventListener('load', () => { frameLoaded = true; connectEditor(); });
 frame.src = 'https://app.pen.dev/new?embed';
 window.pencilPanelState = 'loading';
 if (window.pencilPanelPreview) start(window.pencilPanelPreview);
 else {
-  app = new App({ name: 'Pencil', version: '0.1.2' }, { availableDisplayModes: ['fullscreen'] });
+  app = new App({ name: 'Pencil', version: '0.2.0' }, { availableDisplayModes: ['fullscreen'] });
   app.ontoolresult = result => { if (result._meta?.editor) start(result._meta.editor); };
   app.connect().catch(e => show(`Hôte MCP Apps : ${e.message}`));
 }

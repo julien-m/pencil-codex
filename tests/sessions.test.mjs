@@ -45,7 +45,7 @@ describe('opaque storage', () => {
     await fs.writeFile(file, 'human-edit');
     expect(await r.storage(id, generation, 'storage-write', { fileURI, content: 'stale' })).toBe(2);
     expect(await fs.readFile(file, 'utf8')).toBe('human-edit');
-    expect(await fs.readFile(r.get(id).draft, 'utf8')).toBe('opaque-new');
+    expect(await fs.readFile(r.get(id).draft, 'utf8')).toBe('stale');
   });
   test('asset writes cannot replace another session document', async () => {
     const r = new Sessions({draftRoot: path.join(dir, 'drafts')}); const { sessionId: id } = await r.open(path.join(dir, 'a.pen'), 'a'); await r.open(path.join(dir, 'b.pen'), 'b'); const { generation } = r.attach(id, () => {});

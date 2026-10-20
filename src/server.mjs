@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { connectBroker, root } from './client.mjs';
 
-const server = new McpServer({ name: 'pencil-panel', version: '0.1.2' });
+const server = new McpServer({ name: 'pencil-panel', version: '0.2.0' });
 const resource = 'ui://pencil-panel/editor-v1.html';
 const defaultScope = process.env.CODEX_THREAD_ID ?? `client-${randomUUID()}`;
 let broker;
@@ -34,9 +34,10 @@ server.registerTool('pencil_open', {
 const id = z.string().uuid();
 server.registerTool('pencil_new', { description: 'Créer un nouveau fichier .pen au chemin absolu choisi, sans écraser de fichier existant, puis ouvrir sa vue Pencil.', inputSchema: { path: z.string(), scope: z.string().optional() }, _meta: { ui: { resourceUri: resource } } }, wrap(args => open(args.path, args.scope, 'new')));
 const selection = { sessionId: id, lease: id, nodeIds: z.array(z.string().min(1)).min(1).max(20), directory: z.string().min(1) };
+server.registerTool('pencil_save', { description: 'Enregistrer les modifications dans le fichier .pen ouvert. Demande au moteur de vider ses changements, conserve une version de récupération et refuse un conflit externe. Réservation requise.', inputSchema: { sessionId: id, lease: id }, annotations: { readOnlyHint: false, destructiveHint: true } }, wrap(async args => object(await (await backend()).rpc('save', args))));
 server.registerTool('pencil_capture', { description: 'Capturer des composants ou vues par ID natif, ou ["document"] pour tout le projet. Produit des images PNG et les enregistre dans le dossier absolu choisi. Aucun écrasement.', inputSchema: selection }, wrap(async args => (await backend()).rpc('capture', args)));
 server.registerTool('pencil_export', { description: 'Exporter les nœuds sélectionnés vers PNG/JPEG/WEBP/PDF/HTML dans le dossier absolu choisi. Le résultat contient les fichiers réellement écrits. Réservation requise ; aucun écrasement.', inputSchema: { ...selection, format: z.enum(['png', 'jpeg', 'webp', 'pdf', 'html-css', 'html-tailwind']) } }, wrap(async args => (await backend()).rpc('export', args)));
-server.registerTool('pencil_save_as', { description: 'Enregistrer le dernier snapshot acquitté dans un NOUVEAU fichier .pen au chemin choisi. Attendre draft-saved dans pencil_status ; aucun écrasement ni basculement implicite de document.', inputSchema: { sessionId: id, lease: id, path: z.string() } }, wrap(async args => object(await (await backend()).rpc('save-as', args))));
+server.registerTool('pencil_save_as', { description: 'Enregistrer le dernier snapshot acquitté dans un NOUVEAU fichier .pen au chemin choisi. Utiliser un snapshot acquitté (draft-saved, source-saved ou conflict) dans pencil_status ; aucun écrasement ni basculement implicite de document.', inputSchema: { sessionId: id, lease: id, path: z.string() } }, wrap(async args => object(await (await backend()).rpc('save-as', args))));
 server.registerTool('pencil_tools', { description: 'Découvrir les schémas natifs publiés par le moteur de cette session ; respecter ces schémas avant pencil_call.', inputSchema: { sessionId: id }, annotations: { readOnlyHint: true } }, wrap(async args => object(await (await backend()).rpc('schema', args))));
 server.registerTool('pencil_status', { description: 'Vérifier le document, le canal, la sauvegarde et la réservation de cette session Pencil.', inputSchema: { sessionId: id }, annotations: { readOnlyHint: true } }, wrap(async args => object(await (await backend()).rpc('status', args))));
 server.registerTool('pencil_begin', { description: 'Réserver le document partagé pour une courte séquence lecture-modification-vérification. LEASE_BUSY signifie attendre puis relire ; aucun verrou implicite basé sur le focus.', inputSchema: { sessionId: id, agent: z.string().min(1).max(200) } }, wrap(async args => object(await (await backend()).rpc('acquire', args))));

@@ -20,7 +20,7 @@ export async function startBroker({ token = randomUUID(), timeout, draftRoot } =
       for await (const chunk of req) { raw += chunk; if (raw.length > 40 * 1024 * 1024) throw new Error('Request too large'); }
       const { method, args = {} } = JSON.parse(raw);
       let result;
-      if (method === 'ping') result = { version: '0.1.2' };
+      if (method === 'ping') result = { version: '0.2.0' };
       else if (method === 'open' || method === 'new') {
         const filename = method === 'new' ? await createDocument(args.path) : args.path;
         result = await sessions.open(filename, args.scope);
@@ -33,6 +33,7 @@ export async function startBroker({ token = randomUUID(), timeout, draftRoot } =
       else if (method === 'call') result = await sessions.call(args.sessionId, args.lease, args.tool, args.arguments);
       else if (method === 'capture') result = await sessions.capture(args.sessionId, args.lease, args.nodeIds, args.directory);
       else if (method === 'export') result = await sessions.exportNodes(args.sessionId, args.lease, args.nodeIds, args.format, args.directory);
+      else if (method === 'save') { result = await sessions.save(args.sessionId, args.lease); broadcast(args.sessionId); }
       else if (method === 'save-as') result = await sessions.saveAs(args.sessionId, args.lease, args.path);
       else throw new Error('Unknown broker method');
       res.end(JSON.stringify({ result }));
@@ -58,6 +59,27 @@ export async function startBroker({ token = randomUUID(), timeout, draftRoot } =
         try {
           const message = JSON.parse(bytes.toString());
           if (message.kind === 'response') sessions.reply(id, generation, message);
+          else if (message.kind === 'save') {
+            void (async () => {
+              let lease;
+              try {
+                lease = sessions.acquire(id, 'Vous · Enregistrer').lease; broadcast(id);
+                const result = await sessions.save(id, lease);
+                if (peer.readyState === 1) peer.send(JSON.stringify({ kind: 'save-result', result }));
+              } catch (error) {
+                if (peer.readyState === 1) peer.send(JSON.stringify({ kind: 'save-result', error: { code: error.code ?? 'SAVE_FAILED', message: error.message } }));
+              } finally {
+                if (lease && !sessions.get(id).blocked) {
+                  try { sessions.release(id, lease); }
+                  catch (error) {
+                    sessions.get(id).blocked = true;
+                    if (peer.readyState === 1) peer.send(JSON.stringify({ kind: 'fatal', message: `Enregistrement terminé ; session à réconcilier : ${error.message}` }));
+                  }
+                }
+                broadcast(id);
+              }
+            })();
+          }
           else if (message.kind === 'storage') {
             storageTail = storageTail.then(async () => {
               try {

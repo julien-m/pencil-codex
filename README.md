@@ -1,5 +1,13 @@
 # Pencil
 
+<p align="center">
+  <img src="docs/images/login-forma.png" alt="Forma light login designed in Pencil" width="49%" />
+  <img src="docs/images/login-orbit.png" alt="Orbit dark login designed in Pencil" width="49%" />
+</p>
+<p align="center"><em>Two login screens designed in Pencil, saved to a .pen document, and exported with this plugin.</em></p>
+
+Open [the editable demo](examples/login-demo.pen) to inspect both screens. These are design mockups, not an authentication implementation.
+
 A Codex plugin that opens `.pen` design documents in an embedded Pencil editor, without adding another chat interface. A local Node.js service maintains one channel per design session. Multiple agents share a `sessionId` and reserve the document for short editing sequences.
 
 ## Repository and platform
@@ -72,16 +80,17 @@ Implicit scopes use `CODEX_THREAD_ID` when available, otherwise the MCP process 
 
 The plugin opens documents only through `pencil_open` or `pencil_new`. It does not register an automatic `.pen` file association.
 
-## Captures, exports and Save As
+## Save, captures and exports
 
 | Tool | Result |
 |---|---|
+| `pencil_save` | Flushes current editor changes and saves them to the opened `.pen` file, preserving a recovery copy and checking for external conflicts |
 | `pencil_new` | Creates a `.pen` file at the selected absolute path and returns its editor view |
 | `pencil_capture` | Captures component/screen IDs, or `["document"]` for the whole design, as PNG files in the selected directory |
 | `pencil_export` | Exports PNG, JPEG, WEBP, PDF, HTML/CSS or HTML/Tailwind and returns the files actually written |
 | `pencil_save_as` | Copies the last acknowledged snapshot into a new `.pen` file at the selected path |
 
-Destination directories must already exist. These tools never overwrite an existing destination. Captures and exports require a session reservation. Documents remain opaque to the plugin: the Pencil engine manages their contents, while the plugin transports and stores their bytes.
+Destination directories must already exist. `pencil_new`, `pencil_save_as`, captures and exports never overwrite an existing destination. Explicit `pencil_save` updates the currently opened file. Captures and exports require a session reservation. Documents remain opaque to the plugin: the Pencil engine manages their contents, while the plugin transports and stores their bytes.
 
 Native screenshots may be optimized previews; use raster export when a higher-resolution image is needed. Captures, all six export formats, document creation and Save As have been exercised on disposable test designs.
 
@@ -93,7 +102,13 @@ The plugin's header shows the agent currently holding the document reservation a
 
 ## Persistence and safeguards
 
-Edits are saved to a separate draft in the plugin's data directory. The service never replaces the original document, avoiding the lost-update window of a hash check followed by file replacement. `pencil_status` reports the draft path, which can be opened in Pencil. Use `pencil_save_as` to save the acknowledged draft to a new destination; this version has no command for overwriting the original file.
+Automatic editor saves keep a separate local draft. To update the opened `.pen` file, click **Enregistrer** in the plugin header, or have the agent call `pencil_save` with its reservation. Save asks the engine to flush its current content before publishing the draft to the source path. `pencil_status` reports `source-saved` after a successful explicit Save.
+
+Save checks the source revision recorded when the draft was loaded. This baseline survives editor reloads and service restarts. An existing external change blocks Save; the latest draft remains available through `pencil_save_as` at a new path. Drafts from older plugin versions without a recorded baseline also require Save As.
+
+Each source update retains the previous file in a hidden `.pencil-save-*` recovery directory beside the document. Publication preserves the displaced file and refuses to replace a competing file created at the source path. Node does not provide a portable filesystem compare-and-swap: the source path is briefly absent during publication. This is not a fully atomic transaction with independent writers or a crash-durable database. Avoid editing the same file in another application while saving; after an interrupted save, inspect `previous.pen` and `pending.pen` in the recovery directory before removing it. Open file handles held by another process can still write to the retained previous inode.
+
+The header button reserves the document for its operation; it remains disabled while an agent holds a reservation. Save As continues to write a new destination without switching the active session to that copy.
 
 Assets are limited to `images/` and `fonts/` beside the document. Traversal paths, symbolic links and `.pen` documents used as assets are rejected. External `.pen` libraries are not supported by this initial storage implementation. The editor's document-library/dashboard requests, including `documents-list`, are not implemented either; use the plugin tools to open or create documents.
 

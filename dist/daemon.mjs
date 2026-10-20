@@ -2274,7 +2274,7 @@ var require_websocket = __commonJS({
     var http2 = __require("http");
     var net = __require("net");
     var tls = __require("tls");
-    var { randomBytes, createHash: createHash2 } = __require("crypto");
+    var { randomBytes, createHash: createHash3 } = __require("crypto");
     var { Duplex, Readable } = __require("stream");
     var { URL: URL2 } = __require("url");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -2955,7 +2955,7 @@ var require_websocket = __commonJS({
           abortHandshake(websocket, socket, "Invalid Upgrade header");
           return;
         }
-        const digest2 = createHash2("sha1").update(key + GUID).digest("base64");
+        const digest2 = createHash3("sha1").update(key + GUID).digest("base64");
         if (res.headers["sec-websocket-accept"] !== digest2) {
           abortHandshake(websocket, socket, "Invalid Sec-WebSocket-Accept header");
           return;
@@ -3324,7 +3324,7 @@ var require_websocket_server = __commonJS({
     var EventEmitter = __require("events");
     var http2 = __require("http");
     var { Duplex } = __require("stream");
-    var { createHash: createHash2 } = __require("crypto");
+    var { createHash: createHash3 } = __require("crypto");
     var extension2 = require_extension();
     var PerMessageDeflate2 = require_permessage_deflate();
     var subprotocol2 = require_subprotocol();
@@ -3631,7 +3631,7 @@ var require_websocket_server = __commonJS({
           );
         }
         if (this._state > RUNNING) return abortHandshake(socket, 503);
-        const digest2 = createHash2("sha1").update(key + GUID).digest("base64");
+        const digest2 = createHash3("sha1").update(key + GUID).digest("base64");
         const headers = [
           "HTTP/1.1 101 Switching Protocols",
           "Upgrade: websocket",
@@ -3735,7 +3735,7 @@ var import_websocket_server = __toESM(require_websocket_server(), 1);
 import { randomUUID as randomUUID3, timingSafeEqual } from "node:crypto";
 
 // src/sessions.mjs
-import { randomUUID as randomUUID2, createHash } from "node:crypto";
+import { randomUUID as randomUUID2, createHash as createHash2 } from "node:crypto";
 import * as fs2 from "node:fs/promises";
 import path2 from "node:path";
 import os from "node:os";
@@ -3743,7 +3743,43 @@ import os from "node:os";
 // src/artifacts.mjs
 import * as fs from "node:fs/promises";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
+var hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
+async function replaceDocument(filename, bytes, expectedHash, io = fs) {
+  const conflict = (backup2) => Object.assign(new Error(`Le fichier a chang\xE9. Brouillon conserv\xE9${backup2 ? ` ; version pr\xE9c\xE9dente : ${backup2}` : ""}`), { code: "SAVE_CONFLICT", backupPath: backup2 });
+  if (!(await io.lstat(filename)).isFile() || hash(await io.readFile(filename)) !== expectedHash) throw conflict();
+  const recovery = await io.mkdtemp(path.join(path.dirname(filename), ".pencil-save-"));
+  const backup = path.join(recovery, "previous.pen"), pending = path.join(recovery, "pending.pen");
+  let claimed = false, published = false;
+  try {
+    const handle = await io.open(pending, "wx", 384);
+    try {
+      await handle.writeFile(bytes);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await io.rename(filename, backup);
+    claimed = true;
+    if (!(await io.lstat(backup)).isFile() || hash(await io.readFile(backup)) !== expectedHash) throw conflict(backup);
+    try {
+      await io.link(pending, filename);
+      published = true;
+    } catch (error) {
+      if (error.code === "EEXIST") throw conflict(backup);
+      throw error;
+    }
+    if (hash(await io.readFile(filename)) !== hash(bytes)) throw conflict(backup);
+    return { path: filename, backupPath: backup };
+  } finally {
+    if (claimed && !published) await io.link(backup, filename).catch(() => {
+    });
+    if (published) await io.unlink(pending).catch(() => {
+    });
+    if (!claimed) await io.rm(recovery, { recursive: true, force: true }).catch(() => {
+    });
+  }
+}
 async function writeNewFile(filename, bytes) {
   if (!path.isAbsolute(filename)) throw new Error("Choisir un chemin absolu");
   const parent = await fs.realpath(path.dirname(filename));
@@ -3791,7 +3827,7 @@ async function writeExportFile(directory2, relative, bytes) {
 }
 
 // src/sessions.mjs
-var digest = (value) => createHash("sha256").update(value).digest("hex");
+var digest = (value) => createHash2("sha256").update(value).digest("hex");
 var SessionError = class extends Error {
   constructor(code, message) {
     super(message);
@@ -3859,7 +3895,7 @@ var Sessions = class {
   release(id, token) {
     const s = this.get(id);
     if (s.lease?.token !== token) fail("INVALID_LEASE", "R\xE9servation invalide");
-    if (s.pending.size || s.queued) fail("CALLS_IN_FLIGHT", "Des appels restent en cours");
+    if (s.pending.size || s.queued || s.saving) fail("CALLS_IN_FLIGHT", "Des appels restent en cours");
     if (s.blocked) fail("OUTCOME_UNKNOWN", "Ne pas lib\xE9rer une r\xE9servation avec une op\xE9ration inconnue");
     s.lease = null;
     return this.status(id);
@@ -3867,6 +3903,7 @@ var Sessions = class {
   call(id, token, name, args = {}, { observational = false } = {}) {
     const s = this.get(id);
     if (s.lease?.token !== token) fail("INVALID_LEASE", "R\xE9server le document avant les appels");
+    if (s.saving) fail("SAVE_IN_PROGRESS", "Enregistrement en cours");
     if (!["execute", "read_skill", "get_style", "get_app_state"].includes(name)) fail("TOOL_NOT_ALLOWED", "Outil non expos\xE9 par ce plugin");
     if (name === "execute" && /\bGenerate\s*\(/.test(args.input ?? "")) fail("ASYNC_UNSUPPORTED", "La g\xE9n\xE9ration asynchrone n\u2019est pas prise en charge dans cette version");
     s.queued = (s.queued ?? 0) + 1;
@@ -3887,6 +3924,7 @@ var Sessions = class {
   }
   request(id, method, payload) {
     const s = this.get(id);
+    if (s.saving && method !== "save") fail("SAVE_IN_PROGRESS", "Enregistrement en cours");
     if (!s.connected) fail("EDITOR_OFFLINE", "Ouvrir le fichier .pen dans le panneau et attendre le moteur");
     const requestId = randomUUID2();
     return new Promise((resolve, reject) => {
@@ -3951,25 +3989,73 @@ var Sessions = class {
       s.exportJobs.delete(prefix);
     }
   }
+  async save(id, token) {
+    const s = this.get(id);
+    if (s.lease?.token !== token || s.pending.size || s.queued || s.blocked || s.saving) fail("SAVE_NOT_READY", "R\xE9server la session et attendre la fin des op\xE9rations");
+    s.saving = true;
+    try {
+      const result = await this.request(id, "save");
+      if (result !== 0 && result !== 1) fail("SAVE_NOT_READY", "Le moteur n\u2019a pas confirm\xE9 la sauvegarde");
+      return await this.persist(s, async () => {
+        if (s.savedHash === null || s.saveState === "conflict") fail("SAVE_CONFLICT", "Le fichier a chang\xE9 ; utiliser Enregistrer sous pour conserver le brouillon");
+        let bytes;
+        try {
+          bytes = await fs2.readFile(s.draft);
+        } catch (error) {
+          if (error.code !== "ENOENT") throw error;
+          if (digest(await fs2.readFile(s.file)) !== s.savedHash) fail("SAVE_CONFLICT", "Le fichier a chang\xE9");
+          return { path: s.file, sessionId: id, unchanged: true };
+        }
+        try {
+          const saved = await replaceDocument(s.file, bytes, s.savedHash);
+          s.savedHash = digest(bytes);
+          s.saveState = "source-saved";
+          await this.atomicWrite(`${s.draft}.baseline`, Buffer.from(JSON.stringify({ sourceHash: s.savedHash })));
+          return { ...saved, sessionId: id };
+        } catch (error) {
+          if (error.code === "SAVE_CONFLICT") s.saveState = "conflict";
+          throw error;
+        }
+      });
+    } finally {
+      s.saving = false;
+    }
+  }
   async saveAs(id, token, filename) {
     const s = this.get(id);
-    if (s.lease?.token !== token || s.pending.size || s.queued || s.blocked) fail("SAVE_NOT_READY", "R\xE9server la session et attendre la fin des op\xE9rations");
-    if (s.saveState !== "draft-saved" && s.saveState !== "host-saved") fail("SAVE_NOT_READY", "Attendre un acquittement de sauvegarde du moteur avant Enregistrer sous");
+    if (s.lease?.token !== token || s.pending.size || s.queued || s.blocked || s.saving) fail("SAVE_NOT_READY", "R\xE9server la session et attendre la fin des op\xE9rations");
+    if (!["draft-saved", "source-saved", "conflict"].includes(s.saveState)) fail("SAVE_NOT_READY", "Attendre un acquittement de sauvegarde du moteur avant Enregistrer sous");
     if (path2.extname(filename).toLowerCase() !== ".pen") fail("INVALID_PATH", "Choisir un nouveau fichier .pen");
     const saved = await writeNewFile(filename, await fs2.readFile(s.draft));
     return { path: saved, sessionId: id, sourceUnchanged: true };
   }
-  async storage(id, generation, method, payload) {
+  persist(s, operation) {
+    const result = (s.persistenceTail ?? Promise.resolve()).then(operation);
+    s.persistenceTail = result.catch(() => {
+    });
+    return result;
+  }
+  storage(id, generation, method, payload) {
+    return this.persist(this.get(id), () => this.storageNow(id, generation, method, payload));
+  }
+  async storageNow(id, generation, method, payload) {
     const s = this.get(id);
     if (generation !== s.generation || !s.connected) fail("STALE_CHANNEL", "Canal p\xE9rim\xE9");
     if (method === "documents-save-preview") return null;
     if (method === "storage-load") {
       let bytes = await fs2.readFile(s.file);
-      s.savedHash = digest(bytes);
+      const sourceHash = digest(bytes);
+      s.savedHash = sourceHash;
       s.saveState = "saved";
       try {
         bytes = await fs2.readFile(s.draft);
-        s.saveState = "draft-saved";
+        try {
+          s.savedHash = JSON.parse(await fs2.readFile(`${s.draft}.baseline`, "utf8")).sourceHash;
+        } catch (error) {
+          if (error.code !== "ENOENT") throw error;
+          s.savedHash = null;
+        }
+        s.saveState = s.savedHash === sourceHash ? "draft-saved" : "conflict";
       } catch (e) {
         if (e.code !== "ENOENT") throw e;
       }
@@ -3978,15 +4064,19 @@ var Sessions = class {
     if (method === "storage-write" || method === "storage-save-draft") {
       if (typeof payload?.content !== "string" || Buffer.byteLength(payload.content) > 32 * 1024 * 1024) fail("INVALID_CONTENT", "Contenu invalide");
       if (payload.fileURI !== `file:///${s.virtualRoot}${encodeURIComponent(path2.basename(s.file))}`) fail("WRONG_DOCUMENT", "URI de document inattendue");
-      if (method === "storage-write" && (s.savedHash === null || digest(await fs2.readFile(s.file)) !== s.savedHash)) {
-        s.saveState = "conflict";
-        return 2;
+      let sourceHash;
+      try {
+        sourceHash = digest(await fs2.readFile(s.file));
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
       }
+      const conflict = s.savedHash === null || sourceHash !== s.savedHash;
       await fs2.mkdir(this.draftRoot, { recursive: true, mode: 448 });
       await this.atomicWrite(s.draft, Buffer.from(payload.content));
+      await this.atomicWrite(`${s.draft}.baseline`, Buffer.from(JSON.stringify({ sourceHash: s.savedHash })));
       s.writeEpoch += 1;
-      s.saveState = "draft-saved";
-      return 0;
+      s.saveState = conflict ? "conflict" : "draft-saved";
+      return conflict ? 2 : 0;
     }
     if (!["storage-read-asset", "storage-write-asset", "storage-has-asset"].includes(method)) fail("METHOD_NOT_ALLOWED", `Op\xE9ration de stockage inconnue : ${method}`);
     const key = payload?.path;
@@ -4073,7 +4163,7 @@ async function startBroker({ token = randomUUID3(), timeout, draftRoot } = {}) {
       }
       const { method, args = {} } = JSON.parse(raw);
       let result;
-      if (method === "ping") result = { version: "0.1.2" };
+      if (method === "ping") result = { version: "0.2.0" };
       else if (method === "open" || method === "new") {
         const filename = method === "new" ? await createDocument(args.path) : args.path;
         result = await sessions.open(filename, args.scope);
@@ -4090,7 +4180,10 @@ async function startBroker({ token = randomUUID3(), timeout, draftRoot } = {}) {
       } else if (method === "call") result = await sessions.call(args.sessionId, args.lease, args.tool, args.arguments);
       else if (method === "capture") result = await sessions.capture(args.sessionId, args.lease, args.nodeIds, args.directory);
       else if (method === "export") result = await sessions.exportNodes(args.sessionId, args.lease, args.nodeIds, args.format, args.directory);
-      else if (method === "save-as") result = await sessions.saveAs(args.sessionId, args.lease, args.path);
+      else if (method === "save") {
+        result = await sessions.save(args.sessionId, args.lease);
+        broadcast(args.sessionId);
+      } else if (method === "save-as") result = await sessions.saveAs(args.sessionId, args.lease, args.path);
       else throw new Error("Unknown broker method");
       res.end(JSON.stringify({ result }));
     } catch (e) {
@@ -4131,7 +4224,29 @@ async function startBroker({ token = randomUUID3(), timeout, draftRoot } = {}) {
         try {
           const message = JSON.parse(bytes.toString());
           if (message.kind === "response") sessions.reply(id, generation, message);
-          else if (message.kind === "storage") {
+          else if (message.kind === "save") {
+            void (async () => {
+              let lease;
+              try {
+                lease = sessions.acquire(id, "Vous \xB7 Enregistrer").lease;
+                broadcast(id);
+                const result = await sessions.save(id, lease);
+                if (peer.readyState === 1) peer.send(JSON.stringify({ kind: "save-result", result }));
+              } catch (error) {
+                if (peer.readyState === 1) peer.send(JSON.stringify({ kind: "save-result", error: { code: error.code ?? "SAVE_FAILED", message: error.message } }));
+              } finally {
+                if (lease && !sessions.get(id).blocked) {
+                  try {
+                    sessions.release(id, lease);
+                  } catch (error) {
+                    sessions.get(id).blocked = true;
+                    if (peer.readyState === 1) peer.send(JSON.stringify({ kind: "fatal", message: `Enregistrement termin\xE9 ; session \xE0 r\xE9concilier : ${error.message}` }));
+                  }
+                }
+                broadcast(id);
+              }
+            })();
+          } else if (message.kind === "storage") {
             storageTail = storageTail.then(async () => {
               try {
                 const payload = await sessions.storage(id, generation, message.method, message.payload);

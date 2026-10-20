@@ -22,3 +22,39 @@ test('real loopback transport authenticates and routes one editor without broadc
     assert.deepEqual(results.map(x => x.content[0].text), ['a', 'b']);
   } finally { for (const p of peers) p.terminate(); await b.close(); await fs.rm(dir, { recursive: true, force: true }); }
 });
+test('the editor Save button flushes over WebSocket and publishes the opened file', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pencil-save-ui-'));
+  const b = await startBroker({ timeout: 500, draftRoot: path.join(dir, 'drafts') }); let peer;
+  try {
+    const file = path.join(dir, 'design.pen'); await fs.writeFile(file, 'before');
+    const response = await fetch(`http://127.0.0.1:${b.port}/rpc`, { method: 'POST', headers: { Authorization: `Bearer ${b.token}` }, body: JSON.stringify({ method: 'open', args: { path: file, scope: 'ui-save' } }) });
+    const { result: session } = await response.json();
+    peer = new WebSocket(`ws://127.0.0.1:${b.port}/editor?session=${session.sessionId}&token=${session.editorToken}`);
+    let saveRequest, schemaConflict;
+    const saved = new Promise((resolve, reject) => {
+      peer.on('error', reject);
+      peer.on('message', raw => {
+        const m = JSON.parse(raw);
+        if (m.kind === 'config') peer.send(JSON.stringify({ kind: 'storage', id: 'load', method: 'storage-load' }));
+        if (m.kind === 'storage-response' && m.id === 'load') peer.send(JSON.stringify({ kind: 'save' }));
+        if (m.kind === 'request' && m.method === 'save') {
+          saveRequest = m.id;
+          peer.send(JSON.stringify({ kind: 'storage', id: 'flush', method: 'storage-write', payload: { fileURI: `file:///pencil/${session.sessionId}/design.pen`, content: 'after' } }));
+        }
+        if (m.kind === 'storage-response' && m.id === 'flush') {
+          void (async () => {
+            schemaConflict = await (await fetch(`http://127.0.0.1:${b.port}/rpc`, { method: 'POST', headers: { Authorization: `Bearer ${b.token}` }, body: JSON.stringify({ method: 'schema', args: { sessionId: session.sessionId } }) })).json();
+            peer.send(JSON.stringify({ kind: 'response', id: saveRequest, payload: m.payload }));
+          })();
+        }
+        if (m.kind === 'save-result') resolve(m);
+      });
+    });
+    const result = await saved;
+    assert(!result.error, JSON.stringify(result));
+    assert.equal(await fs.readFile(file, 'utf8'), 'after');
+    assert.equal(await fs.readFile(result.result.backupPath, 'utf8'), 'before');
+    assert.equal(schemaConflict.error.code, 'SAVE_IN_PROGRESS');
+    assert.equal(b.sessions.status(session.sessionId).leaseOwner, null);
+  } finally { peer?.terminate(); await b.close(); await fs.rm(dir, { recursive: true, force: true }); }
+});

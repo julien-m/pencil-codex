@@ -1,0 +1,1413 @@
+{
+  "version": "2.21",
+  "children": [
+    {
+      "type": "frame",
+      "id": "912df86e-2162-4e99-bd2e-be2e3e2cea88",
+      "x": 0,
+      "y": 0,
+      "name": "Forma — Login",
+      "clip": true,
+      "width": 1280,
+      "height": 800,
+      "fill": "#FCFDFB",
+      "children": [
+        {
+          "type": "frame",
+          "id": "U7nAL",
+          "name": "Brand and product story",
+          "width": 560,
+          "height": "fill_container",
+          "fill": "#E8EDE5",
+          "layout": "vertical",
+          "gap": 32,
+          "padding": 48,
+          "justifyContent": "space_between",
+          "children": [
+            {
+              "type": "frame",
+              "id": "pXoBM",
+              "name": "Forma brand",
+              "width": "fill_container",
+              "gap": 12,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "Wpk7c",
+                  "name": "Forma mark",
+                  "width": 28,
+                  "height": 28,
+                  "icon": "layers",
+                  "library": "lucide",
+                  "fill": "#365E46"
+                },
+                {
+                  "type": "text",
+                  "id": "qjWuV",
+                  "name": "Forma wordmark",
+                  "fill": "#25392D",
+                  "content": "forma",
+                  "fontFamily": "Inter",
+                  "fontSize": 27,
+                  "fontWeight": "600",
+                  "letterSpacing": -1
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "U4Tc3p",
+              "name": "Editorial introduction",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 24,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "b9bgSo",
+                  "name": "Story eyebrow",
+                  "fill": "#5A735F",
+                  "content": "A LITTLE SPACE. A LOT OF POSSIBILITY.",
+                  "fontFamily": "Inter",
+                  "fontSize": 11,
+                  "fontWeight": "600",
+                  "letterSpacing": 1.6
+                },
+                {
+                  "type": "text",
+                  "id": "kq4gm",
+                  "name": "Story headline",
+                  "fill": "#25392D",
+                  "content": "Good work\nstarts here.",
+                  "lineHeight": 1.05,
+                  "fontFamily": "DM Serif Display",
+                  "fontSize": 58,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "k3b7Se",
+                  "name": "Story description",
+                  "fill": "#637567",
+                  "content": "Make room for your best ideas. One calm place\nfor your projects, people, and everyday progress.",
+                  "lineHeight": 1.6,
+                  "fontFamily": "Inter",
+                  "fontSize": 15,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "O17Pf",
+                  "name": "Project preview",
+                  "width": "fill_container",
+                  "fill": "#FAFCF7",
+                  "cornerRadius": 12,
+                  "stroke": "#D3DDCF",
+                  "strokeWidth": 1,
+                  "layout": "vertical",
+                  "gap": 16,
+                  "padding": 24,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "Qa8e1",
+                      "name": "Project preview heading",
+                      "width": "fill_container",
+                      "gap": 12,
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "HSl0r",
+                          "name": "Project preview title",
+                          "fill": "#35463C",
+                          "content": "Your week, beautifully in sync",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "ZB15I",
+                          "name": "Project status",
+                          "width": 18,
+                          "height": 18,
+                          "icon": "circle-check",
+                          "library": "lucide",
+                          "fill": "#54765D"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "fjzTJ",
+                      "name": "Brand direction row",
+                      "width": "fill_container",
+                      "gap": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "YyYav",
+                          "name": "Brand direction icon",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "check",
+                          "library": "lucide",
+                          "fill": "#66856C"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "jt70E",
+                          "name": "Brand direction copy",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "rfKOs",
+                              "name": "Brand direction title",
+                              "fill": "#28392F",
+                              "content": "Brand direction",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "F9bDOI",
+                              "name": "Brand direction note",
+                              "fill": "#8B988D",
+                              "content": "Ready for review",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "VvaNZ",
+                      "name": "Website launch row",
+                      "width": "fill_container",
+                      "gap": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "LG8Uc",
+                          "name": "Website launch icon",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "check",
+                          "library": "lucide",
+                          "fill": "#66856C"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "L5ggmr",
+                          "name": "Website launch copy",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "vAGvy",
+                              "name": "Website launch title",
+                              "fill": "#28392F",
+                              "content": "Website launch",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "TbF4l",
+                              "name": "Website launch note",
+                              "fill": "#8B988D",
+                              "content": "Everything in one place",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "za6TX",
+              "name": "Customer quote",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 16,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "vnkz2",
+                  "name": "Quote text",
+                  "fill": "#365344",
+                  "content": "“Finally, a workspace that gives our ideas\nroom to breathe.”",
+                  "lineHeight": 1.4,
+                  "fontFamily": "DM Serif Display",
+                  "fontSize": 17,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "qlzsx",
+                  "name": "Customer attribution",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "km1Qh",
+                      "name": "Customer initials",
+                      "width": 36,
+                      "height": 36,
+                      "fill": "#CAD8C8",
+                      "cornerRadius": 18,
+                      "layout": "vertical",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "lvg1u",
+                          "name": "Initials",
+                          "fill": "#365344",
+                          "content": "JL",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "600"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "jGf5t",
+                      "name": "Customer name",
+                      "fill": "#697C6D",
+                      "content": "Jamie Lee  ·  Design lead, Studio North",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "Udbvm",
+          "name": "Sign in section",
+          "width": "fill_container",
+          "height": "fill_container",
+          "layout": "vertical",
+          "gap": 24,
+          "padding": 48,
+          "justifyContent": "center",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "GJJ7v",
+              "name": "Login form",
+              "width": 400,
+              "layout": "vertical",
+              "gap": 24,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "Dc9RL",
+                  "name": "Form heading",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 12,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "OKjvG",
+                      "name": "Welcome heading",
+                      "fill": "#25392D",
+                      "content": "Welcome back.",
+                      "fontFamily": "Inter",
+                      "fontSize": 34,
+                      "fontWeight": "600",
+                      "letterSpacing": -1
+                    },
+                    {
+                      "type": "text",
+                      "id": "QUf71",
+                      "name": "Welcome description",
+                      "fill": "#7D8B80",
+                      "content": "A fresh start for whatever comes next.",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "YjUq7",
+                  "name": "SSO sign in",
+                  "width": "fill_container",
+                  "height": 52,
+                  "fill": "#FFFFFF",
+                  "cornerRadius": 8,
+                  "stroke": "#D9E0D8",
+                  "strokeWidth": 1,
+                  "gap": 12,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "MiDFg",
+                      "name": "SSO sign in icon",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "shield-check",
+                      "library": "lucide",
+                      "fill": "#35463C"
+                    },
+                    {
+                      "type": "text",
+                      "id": "psnhI",
+                      "name": "SSO sign in label",
+                      "fill": "#35463C",
+                      "content": "Continue with single sign-on",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "pCsj9",
+                  "name": "Email separator",
+                  "width": "fill_container",
+                  "gap": 16,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "id": "hszVi",
+                      "name": "Separator left",
+                      "fill": "#E2E7DF",
+                      "width": "fill_container",
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "PXLgc",
+                      "name": "Separator label",
+                      "fill": "#9AA599",
+                      "content": "or sign in with email",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "rectangle",
+                      "id": "P1IwuP",
+                      "name": "Separator right",
+                      "fill": "#E2E7DF",
+                      "width": "fill_container",
+                      "height": 1
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "A6Kfjo",
+                  "name": "Credentials",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 16,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "dkN39",
+                      "name": "Email address group",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 8,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "JhrAz",
+                          "name": "Email address label",
+                          "fill": "#35463C",
+                          "content": "Email address",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "500"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "OjRNG",
+                          "name": "Email address input",
+                          "width": "fill_container",
+                          "height": 52,
+                          "fill": "#FFFFFF",
+                          "cornerRadius": 8,
+                          "stroke": "#D9E0D8",
+                          "strokeWidth": 1,
+                          "gap": 12,
+                          "padding": 16,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "SNprD",
+                              "name": "Email address icon",
+                              "width": 18,
+                              "height": 18,
+                              "icon": "mail",
+                              "library": "lucide",
+                              "fill": "#819086"
+                            },
+                            {
+                              "type": "text",
+                              "id": "yI0eK",
+                              "name": "Email address placeholder",
+                              "fill": "#94A096",
+                              "content": "you@example.com",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "WWKFz",
+                      "name": "Password group",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 8,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "DjQqK",
+                          "name": "Password label",
+                          "fill": "#35463C",
+                          "content": "Password",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "500"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "X5cSuR",
+                          "name": "Password input",
+                          "width": "fill_container",
+                          "height": 52,
+                          "fill": "#FFFFFF",
+                          "cornerRadius": 8,
+                          "stroke": "#D9E0D8",
+                          "strokeWidth": 1,
+                          "gap": 12,
+                          "padding": 16,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "Q11Vd",
+                              "name": "Password icon",
+                              "width": 18,
+                              "height": 18,
+                              "icon": "lock-keyhole",
+                              "library": "lucide",
+                              "fill": "#819086"
+                            },
+                            {
+                              "type": "text",
+                              "id": "B8bD4",
+                              "name": "Password placeholder",
+                              "fill": "#94A096",
+                              "content": "Enter your password",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "uWGMM",
+                  "name": "Login options",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "EPfiT",
+                      "name": "Remember me",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "rectangle",
+                          "cornerRadius": 3,
+                          "id": "RayGW",
+                          "name": "Remember checkbox",
+                          "fill": "#FFFFFF",
+                          "width": 14,
+                          "height": 14,
+                          "stroke": "#BAC9B9",
+                          "strokeWidth": 1
+                        },
+                        {
+                          "type": "text",
+                          "id": "mKtmq",
+                          "name": "Remember label",
+                          "fill": "#7D8B80",
+                          "content": "Remember me",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "UiiBj",
+                      "name": "Forgot password",
+                      "fill": "#365E46",
+                      "content": "Forgot password?",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "zucC2",
+                  "name": "Primary sign in",
+                  "width": "fill_container",
+                  "height": 52,
+                  "fill": "#365E46",
+                  "cornerRadius": 8,
+                  "gap": 12,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "d5WFXK",
+                      "name": "Primary sign in label",
+                      "fill": "#FFFFFF",
+                      "content": "Sign in",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "LTeuy",
+                  "name": "Create account link",
+                  "width": "fill_container",
+                  "gap": 4,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "EAlh6",
+                      "name": "Create account prompt",
+                      "fill": "#7D8B80",
+                      "content": "New to Forma?",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "w4bCs",
+                      "name": "Create account action",
+                      "fill": "#365E46",
+                      "content": "Create an account",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Ow5VE",
+              "name": "Security note",
+              "width": 400,
+              "gap": 8,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "GJwAn",
+                  "name": "Security icon",
+                  "width": 14,
+                  "height": 14,
+                  "icon": "shield-check",
+                  "library": "lucide",
+                  "fill": "#9AA599"
+                },
+                {
+                  "type": "text",
+                  "id": "kmnui",
+                  "name": "Security copy",
+                  "fill": "#9AA599",
+                  "content": "Your ideas are safe here.",
+                  "fontFamily": "Inter",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "Lak02",
+      "x": 1408,
+      "y": 0,
+      "name": "Orbit — Login",
+      "clip": true,
+      "width": 1280,
+      "height": 800,
+      "fill": "#11141C",
+      "layout": "vertical",
+      "gap": 32,
+      "padding": 48,
+      "children": [
+        {
+          "type": "frame",
+          "id": "RWUso",
+          "name": "Orbit header",
+          "width": "fill_container",
+          "gap": 12,
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "A5dhMW",
+              "name": "Orbit brand",
+              "gap": 12,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "yObHT",
+                  "name": "Orbit icon",
+                  "width": 28,
+                  "height": 28,
+                  "icon": "orbit",
+                  "library": "lucide",
+                  "fill": "#B9B5FF"
+                },
+                {
+                  "type": "text",
+                  "id": "B8F4Fa",
+                  "name": "Orbit wordmark",
+                  "fill": "#F6F5FF",
+                  "content": "orbit.",
+                  "fontFamily": "Inter",
+                  "fontSize": 28,
+                  "fontWeight": "600",
+                  "letterSpacing": -1
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "vu0Bw",
+              "name": "Registration navigation",
+              "gap": 8,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "ZUZrP",
+                  "name": "New here label",
+                  "fill": "#8993A8",
+                  "content": "New here?",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "v3E4A",
+                  "name": "Create account link",
+                  "fill": "#C3C0FF",
+                  "content": "Create an account ↗",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "500"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "u0035",
+          "name": "Orbit main section",
+          "width": "fill_container",
+          "height": "fill_container",
+          "gap": 80,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "helSH",
+              "name": "Orbit product story",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 32,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "tX5Wn",
+                  "name": "Product badge",
+                  "fill": "#242333",
+                  "cornerRadius": 16,
+                  "gap": 8,
+                  "padding": [
+                    8,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "f2k7Eu",
+                      "name": "Badge sparkle",
+                      "width": 14,
+                      "height": 14,
+                      "icon": "sparkles",
+                      "library": "lucide",
+                      "fill": "#BCB8FF"
+                    },
+                    {
+                      "type": "text",
+                      "id": "c0Bvaz",
+                      "name": "Badge text",
+                      "fill": "#C3C0FF",
+                      "content": "A WORKSPACE FOR WHAT’S NEXT",
+                      "fontFamily": "Inter",
+                      "fontSize": 10,
+                      "fontWeight": "600",
+                      "letterSpacing": 1
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "dkyYL",
+                  "name": "Orbit editorial headline",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 16,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "sndfu",
+                      "name": "Orbit headline",
+                      "fill": "#F6F5FF",
+                      "content": "Your next big\nidea starts here.",
+                      "lineHeight": 1.12,
+                      "fontFamily": "Inter",
+                      "fontSize": 54,
+                      "fontWeight": "500",
+                      "letterSpacing": -2
+                    },
+                    {
+                      "type": "text",
+                      "id": "r1vxsn",
+                      "name": "Orbit description",
+                      "fill": "#929BAF",
+                      "content": "Less friction. More possibility. Bring your projects,\npeople, and best thinking into one shared orbit.",
+                      "lineHeight": 1.6,
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "n0x9K",
+                  "name": "Orbit benefits",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 16,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "X1BKr",
+                      "name": "Everything you need, beautifully connected",
+                      "width": "fill_container",
+                      "gap": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "iP59u",
+                          "name": "Everything you need, beautifully connected icon",
+                          "width": 18,
+                          "height": 18,
+                          "icon": "layers",
+                          "library": "lucide",
+                          "fill": "#B9B5FF"
+                        },
+                        {
+                          "type": "text",
+                          "id": "H1nNkB",
+                          "name": "Everything you need, beautifully connected text",
+                          "fill": "#B1BACD",
+                          "content": "Everything you need, beautifully connected",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "OENJH",
+                      "name": "Built for momentum, not busywork",
+                      "width": "fill_container",
+                      "gap": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "B9ybG",
+                          "name": "Built for momentum, not busywork icon",
+                          "width": 18,
+                          "height": 18,
+                          "icon": "zap",
+                          "library": "lucide",
+                          "fill": "#B9B5FF"
+                        },
+                        {
+                          "type": "text",
+                          "id": "n0478F",
+                          "name": "Built for momentum, not busywork text",
+                          "fill": "#B1BACD",
+                          "content": "Built for momentum, not busywork",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "BJij7",
+                      "name": "Private by design. Yours by default.",
+                      "width": "fill_container",
+                      "gap": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "pwQts",
+                          "name": "Private by design. Yours by default. icon",
+                          "width": 18,
+                          "height": 18,
+                          "icon": "shield-check",
+                          "library": "lucide",
+                          "fill": "#B9B5FF"
+                        },
+                        {
+                          "type": "text",
+                          "id": "ujJlQ",
+                          "name": "Private by design. Yours by default. text",
+                          "fill": "#B1BACD",
+                          "content": "Private by design. Yours by default.",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "TGge4",
+                  "name": "Orbit social proof",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "P44Vr",
+                      "name": "Member avatars",
+                      "gap": 4,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "hz5rD",
+                          "name": "Avatar AL",
+                          "width": 28,
+                          "height": 28,
+                          "fill": "#41465C",
+                          "cornerRadius": 14,
+                          "layout": "vertical",
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "P5qt8",
+                              "name": "Avatar initials AL",
+                              "fill": "#EEEFFD",
+                              "content": "AL",
+                              "fontFamily": "Inter",
+                              "fontSize": 9,
+                              "fontWeight": "600"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "aOQrd",
+                          "name": "Avatar JT",
+                          "width": 28,
+                          "height": 28,
+                          "fill": "#514866",
+                          "cornerRadius": 14,
+                          "layout": "vertical",
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "Dy4in",
+                              "name": "Avatar initials JT",
+                              "fill": "#EEEFFD",
+                              "content": "JT",
+                              "fontFamily": "Inter",
+                              "fontSize": 9,
+                              "fontWeight": "600"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "B576O7",
+                          "name": "Avatar MK",
+                          "width": 28,
+                          "height": 28,
+                          "fill": "#3D5360",
+                          "cornerRadius": 14,
+                          "layout": "vertical",
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "t6IhTj",
+                              "name": "Avatar initials MK",
+                              "fill": "#EEEFFD",
+                              "content": "MK",
+                              "fontFamily": "Inter",
+                              "fontSize": 9,
+                              "fontWeight": "600"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "UzWGT",
+                      "name": "Social proof label",
+                      "fill": "#7F899E",
+                      "content": "Join 2,000+ teams building what’s next.",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "YSYCT",
+              "name": "Orbit sign in card",
+              "width": 460,
+              "fill": "#1B202B",
+              "cornerRadius": 16,
+              "stroke": "#323947",
+              "strokeWidth": 1,
+              "layout": "vertical",
+              "gap": 24,
+              "padding": 40,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "AcVTm",
+                  "name": "Orbit form heading",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "SyAI4",
+                      "name": "Orbit welcome",
+                      "fill": "#F3F2FF",
+                      "content": "Welcome to your orbit",
+                      "fontFamily": "Inter",
+                      "fontSize": 27,
+                      "fontWeight": "500",
+                      "letterSpacing": -0.6
+                    },
+                    {
+                      "type": "text",
+                      "id": "cRQLB",
+                      "name": "Orbit welcome subtitle",
+                      "fill": "#8993A8",
+                      "content": "Sign in to pick up where you left off.",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "t5haL",
+                  "name": "Orbit credentials",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 16,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "VXMTs",
+                      "name": "Email address group",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 8,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "J97Me3",
+                          "name": "Email address label",
+                          "fill": "#E5E9F2",
+                          "content": "Email address",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "500"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "f2qDl",
+                          "name": "Email address input",
+                          "width": "fill_container",
+                          "height": 52,
+                          "fill": "#171B25",
+                          "cornerRadius": 8,
+                          "stroke": "#3A4152",
+                          "strokeWidth": 1,
+                          "gap": 12,
+                          "padding": 16,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "L30Bs",
+                              "name": "Email address icon",
+                              "width": 18,
+                              "height": 18,
+                              "icon": "mail",
+                              "library": "lucide",
+                              "fill": "#8993A8"
+                            },
+                            {
+                              "type": "text",
+                              "id": "RUxJY",
+                              "name": "Email address placeholder",
+                              "fill": "#8590A7",
+                              "content": "you@example.com",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "st6uP",
+                      "name": "Password group",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 8,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "JLqio",
+                          "name": "Password label",
+                          "fill": "#E5E9F2",
+                          "content": "Password",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "500"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "X5g578",
+                          "name": "Password input",
+                          "width": "fill_container",
+                          "height": 52,
+                          "fill": "#171B25",
+                          "cornerRadius": 8,
+                          "stroke": "#3A4152",
+                          "strokeWidth": 1,
+                          "gap": 12,
+                          "padding": 16,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "zhcOD",
+                              "name": "Password icon",
+                              "width": 18,
+                              "height": 18,
+                              "icon": "lock-keyhole",
+                              "library": "lucide",
+                              "fill": "#8993A8"
+                            },
+                            {
+                              "type": "text",
+                              "id": "WTHVA",
+                              "name": "Password placeholder",
+                              "fill": "#8590A7",
+                              "content": "Enter your password",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "j162Q",
+                  "name": "Orbit forgot password",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "justifyContent": "end",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "JeMlb",
+                      "name": "Orbit reset link",
+                      "fill": "#C3C0FF",
+                      "content": "Forgot your password?",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "oacG8",
+                  "name": "Orbit primary sign in",
+                  "width": "fill_container",
+                  "height": 52,
+                  "fill": "#B9B5FF",
+                  "cornerRadius": 8,
+                  "gap": 12,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "xfhMQ",
+                      "name": "Orbit primary sign in label",
+                      "fill": "#19192C",
+                      "content": "Continue →",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "kOODk",
+                  "name": "Orbit separator",
+                  "width": "fill_container",
+                  "gap": 16,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "id": "KHldC",
+                      "name": "Orbit divider left",
+                      "fill": "#363D4C",
+                      "width": "fill_container",
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "M4Z5O",
+                      "name": "Orbit divider text",
+                      "fill": "#7F899E",
+                      "content": "or",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "rectangle",
+                      "id": "FEya3",
+                      "name": "Orbit divider right",
+                      "fill": "#363D4C",
+                      "width": "fill_container",
+                      "height": 1
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "w5LdR",
+                  "name": "Orbit SSO sign in",
+                  "width": "fill_container",
+                  "height": 52,
+                  "fill": "#242A39",
+                  "cornerRadius": 8,
+                  "stroke": "#3A4152",
+                  "strokeWidth": 1,
+                  "gap": 12,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "S2GRlQ",
+                      "name": "Orbit SSO sign in icon",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "shield-check",
+                      "library": "lucide",
+                      "fill": "#EEF0FA"
+                    },
+                    {
+                      "type": "text",
+                      "id": "w8l5K",
+                      "name": "Orbit SSO sign in label",
+                      "fill": "#EEF0FA",
+                      "content": "Continue with single sign-on",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "WyPVc",
+                  "name": "Orbit terms notice",
+                  "fill": "#6E788D",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "By continuing, you agree to our Terms of Service\nand Privacy Policy.",
+                  "lineHeight": 1.5,
+                  "textAlign": "center",
+                  "fontFamily": "Inter",
+                  "fontSize": 10,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "HLhU8",
+          "name": "Orbit footer",
+          "width": "fill_container",
+          "gap": 12,
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "Olf2M",
+              "name": "Orbit copyright",
+              "fill": "#626D82",
+              "content": "© 2026 Orbit. Made for forward thinkers.",
+              "fontFamily": "Inter",
+              "fontSize": 10,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "v9SOyo",
+              "name": "Orbit footer links",
+              "fill": "#7F899E",
+              "content": "Privacy    ·    Terms    ·    Help center",
+              "fontFamily": "Inter",
+              "fontSize": 10,
+              "fontWeight": "normal"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "fileToken": "9c6fd82c-3c22-4025-80a7-d5dcf142236b"
+}

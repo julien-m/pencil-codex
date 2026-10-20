@@ -2,7 +2,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { writeNewFile, exportDirectory, writeExportFile } from './artifacts.mjs';
+import { writeNewFile, replaceDocument, exportDirectory, writeExportFile } from './artifacts.mjs';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
 export class SessionError extends Error {
@@ -59,7 +59,7 @@ export class Sessions {
   release(id, token) {
     const s = this.get(id);
     if (s.lease?.token !== token) fail('INVALID_LEASE', 'Réservation invalide');
-    if (s.pending.size || s.queued) fail('CALLS_IN_FLIGHT', 'Des appels restent en cours');
+    if (s.pending.size || s.queued || s.saving) fail('CALLS_IN_FLIGHT', 'Des appels restent en cours');
     if (s.blocked) fail('OUTCOME_UNKNOWN', 'Ne pas libérer une réservation avec une opération inconnue');
     s.lease = null;
     return this.status(id);
@@ -67,6 +67,7 @@ export class Sessions {
   call(id, token, name, args = {}, { observational = false } = {}) {
     const s = this.get(id);
     if (s.lease?.token !== token) fail('INVALID_LEASE', 'Réserver le document avant les appels');
+    if (s.saving) fail('SAVE_IN_PROGRESS', 'Enregistrement en cours');
     if (!['execute', 'read_skill', 'get_style', 'get_app_state'].includes(name)) fail('TOOL_NOT_ALLOWED', 'Outil non exposé par ce plugin');
     // Generation and execution are mixed in execute; async generation is excluded from v0.1.
     if (name === 'execute' && /\bGenerate\s*\(/.test(args.input ?? '')) fail('ASYNC_UNSUPPORTED', 'La génération asynchrone n’est pas prise en charge dans cette version');
@@ -85,6 +86,7 @@ export class Sessions {
   }
   request(id, method, payload) {
     const s = this.get(id);
+    if (s.saving && method !== 'save') fail('SAVE_IN_PROGRESS', 'Enregistrement en cours');
     if (!s.connected) fail('EDITOR_OFFLINE', 'Ouvrir le fichier .pen dans le panneau et attendre le moteur');
     const requestId = randomUUID();
     return new Promise((resolve, reject) => {
@@ -133,33 +135,76 @@ export class Sessions {
       return { ...result, structuredContent: { files: job.files } };
     } finally { s.exportJobs.delete(prefix); }
   }
+  async save(id, token) {
+    const s = this.get(id);
+    if (s.lease?.token !== token || s.pending.size || s.queued || s.blocked || s.saving) fail('SAVE_NOT_READY', 'Réserver la session et attendre la fin des opérations');
+    s.saving = true;
+    try {
+      // Ask the engine to flush its current content, including unsaved manual edits.
+      const result = await this.request(id, 'save');
+      if (result !== 0 && result !== 1) fail('SAVE_NOT_READY', 'Le moteur n’a pas confirmé la sauvegarde');
+      return await this.persist(s, async () => {
+        if (s.savedHash === null || s.saveState === 'conflict') fail('SAVE_CONFLICT', 'Le fichier a changé ; utiliser Enregistrer sous pour conserver le brouillon');
+        let bytes;
+        try { bytes = await fs.readFile(s.draft); }
+        catch (error) {
+          if (error.code !== 'ENOENT') throw error;
+          if (digest(await fs.readFile(s.file)) !== s.savedHash) fail('SAVE_CONFLICT', 'Le fichier a changé');
+          return { path: s.file, sessionId: id, unchanged: true };
+        }
+        try {
+          const saved = await replaceDocument(s.file, bytes, s.savedHash);
+          s.savedHash = digest(bytes); s.saveState = 'source-saved';
+          await this.atomicWrite(`${s.draft}.baseline`, Buffer.from(JSON.stringify({ sourceHash: s.savedHash })));
+          return { ...saved, sessionId: id };
+        } catch (error) { if (error.code === 'SAVE_CONFLICT') s.saveState = 'conflict'; throw error; }
+      });
+    } finally { s.saving = false; }
+  }
   async saveAs(id, token, filename) {
     const s = this.get(id);
-    if (s.lease?.token !== token || s.pending.size || s.queued || s.blocked) fail('SAVE_NOT_READY', 'Réserver la session et attendre la fin des opérations');
-    if (s.saveState !== 'draft-saved' && s.saveState !== 'host-saved') fail('SAVE_NOT_READY', 'Attendre un acquittement de sauvegarde du moteur avant Enregistrer sous');
+    if (s.lease?.token !== token || s.pending.size || s.queued || s.blocked || s.saving) fail('SAVE_NOT_READY', 'Réserver la session et attendre la fin des opérations');
+    if (!['draft-saved', 'source-saved', 'conflict'].includes(s.saveState)) fail('SAVE_NOT_READY', 'Attendre un acquittement de sauvegarde du moteur avant Enregistrer sous');
     if (path.extname(filename).toLowerCase() !== '.pen') fail('INVALID_PATH', 'Choisir un nouveau fichier .pen');
     const saved = await writeNewFile(filename, await fs.readFile(s.draft));
     return { path: saved, sessionId: id, sourceUnchanged: true };
   }
-  async storage(id, generation, method, payload) {
+  persist(s, operation) {
+    const result = (s.persistenceTail ?? Promise.resolve()).then(operation);
+    s.persistenceTail = result.catch(() => {});
+    return result;
+  }
+  storage(id, generation, method, payload) {
+    return this.persist(this.get(id), () => this.storageNow(id, generation, method, payload));
+  }
+  async storageNow(id, generation, method, payload) {
     const s = this.get(id);
     if (generation !== s.generation || !s.connected) fail('STALE_CHANNEL', 'Canal périmé');
     if (method === 'documents-save-preview') return null; // Optional dashboard thumbnail, no document persistence.
     if (method === 'storage-load') {
       let bytes = await fs.readFile(s.file);
-      s.savedHash = digest(bytes); s.saveState = 'saved';
-      try { bytes = await fs.readFile(s.draft); s.saveState = 'draft-saved'; } catch (e) { if (e.code !== 'ENOENT') throw e; }
+      const sourceHash = digest(bytes); s.savedHash = sourceHash; s.saveState = 'saved';
+      try {
+        bytes = await fs.readFile(s.draft);
+        // Persist the original revision across reloads/restarts. Legacy drafts
+        // without a baseline are recoverable through Save As, not blind Save.
+        try { s.savedHash = JSON.parse(await fs.readFile(`${s.draft}.baseline`, 'utf8')).sourceHash; }
+        catch (error) { if (error.code !== 'ENOENT') throw error; s.savedHash = null; }
+        s.saveState = s.savedHash === sourceHash ? 'draft-saved' : 'conflict';
+      } catch (e) { if (e.code !== 'ENOENT') throw e; }
       return { filePath: path.basename(s.file), content: bytes.toString('utf8'), updatedAt: (await fs.stat(s.file)).mtimeMs };
     }
     if (method === 'storage-write' || method === 'storage-save-draft') {
       if (typeof payload?.content !== 'string' || Buffer.byteLength(payload.content) > 32 * 1024 * 1024) fail('INVALID_CONTENT', 'Contenu invalide');
       if (payload.fileURI !== `file:///${s.virtualRoot}${encodeURIComponent(path.basename(s.file))}`) fail('WRONG_DOCUMENT', 'URI de document inattendue');
-      if (method === 'storage-write' && (s.savedHash === null || digest(await fs.readFile(s.file)) !== s.savedHash)) { s.saveState = 'conflict'; return 2; }
-      // Direct-path previews never replace the user's source. Native file viewers
-      // save through the host's ETag-aware resource API in the UI instead.
+      let sourceHash;
+      try { sourceHash = digest(await fs.readFile(s.file)); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      const conflict = s.savedHash === null || sourceHash !== s.savedHash;
+      // Autosave keeps a draft; only explicit Save publishes to the source path.
       await fs.mkdir(this.draftRoot, { recursive: true, mode: 0o700 });
       await this.atomicWrite(s.draft, Buffer.from(payload.content));
-      s.writeEpoch += 1; s.saveState = 'draft-saved'; return 0;
+      await this.atomicWrite(`${s.draft}.baseline`, Buffer.from(JSON.stringify({ sourceHash: s.savedHash })));
+      s.writeEpoch += 1; s.saveState = conflict ? 'conflict' : 'draft-saved'; return conflict ? 2 : 0;
     }
     if (!['storage-read-asset', 'storage-write-asset', 'storage-has-asset'].includes(method)) fail('METHOD_NOT_ALLOWED', `Opération de stockage inconnue : ${method}`);
     const key = payload?.path;

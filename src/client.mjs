@@ -10,7 +10,7 @@ export async function connectBroker(directory = process.env.PLUGIN_DATA ?? path.
     try {
       const info = JSON.parse(await fs.readFile(connection, 'utf8'));
       const response = await fetch(`http://127.0.0.1:${info.port}/rpc`, { method: 'POST', headers: { Authorization: `Bearer ${info.token}` }, body: JSON.stringify({ method: 'ping' }), signal: AbortSignal.timeout(1000) });
-      if (!response.ok || (await response.json()).result?.version !== '0.1.2') return null;
+      if (!response.ok || (await response.json()).result?.version !== '0.2.0') return null;
       return info;
     } catch { return null; }
   };
