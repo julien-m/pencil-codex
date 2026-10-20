@@ -20,7 +20,7 @@ Read [the plugin manifest](plugin.json) for its identity, [the MCP configuration
 
 **The native Codex panel is not fully working in the host tested so far.** The MCP App opens, but its WebSocket connection to the local service fails with “Canal local inaccessible dans cet hôte”. Installing the plugin and passing its protocol tests do not establish that the native panel works in your host.
 
-The local browser preview is the real-editor validation surface. Automated HTTP/WebSocket tests require both agents' requests to reach one editor before either response is returned. Two independent agents also created distinct mockups in one real-editor session, with overlapping request intervals; both frames were captured and the shared document was saved. Opening the same document under another session scope remains rejected with `DOCUMENT_BUSY`.
+The installed editor resource was validated in a local browser against the real hosted engine. Three model sub-agents independently created their own frames in one initially empty document; the shared document was saved and captured. Scripted fixtures test transport mechanics and are not independent agents. Automated transport tests separately verify overlapping requests. Read [the installed-validation report](docs/installed-validation.md) for measurements and limitations. Opening the same document under another session scope remains rejected with `DOCUMENT_BUSY`.
 
 Requirements:
 
@@ -72,7 +72,7 @@ The build generates `dist/server.mjs`, `dist/daemon.mjs`, `dist/editor.html` and
 ## Usage
 
 1. Ask the agent to use the installed Pencil plugin. Call `pencil_open` with an absolute file path and an explicit design-session `scope`, or call `pencil_new` to create a document. The tool returns its UI resource; rendering and connecting that resource depend on the host.
-2. Launch collaborating agents while the view opens. `pencil_begin` joins immediately even offline; only engine calls wait for readiness. call `pencil_tools` to discover the native schemas, then load the native instructions through `pencil_call` with `read_skill`.
+2. Launch collaborating agents while the view opens. `pencil_begin` joins immediately even offline; only engine calls wait for readiness. Call `pencil_tools` to discover the native schemas, then load the native instructions through `pencil_call` with `read_skill`.
 3. Each agent calls `pencil_begin` to join, uses its own returned `lease` with `pencil_call`, then leaves with `pencil_end`. The legacy field name `lease` now identifies a non-exclusive participation token. Agents can join and send requests at the same time; one agent leaving does not end the others’ participation.
 4. Give every agent collaborating on that document the same returned `sessionId`. Do not open the same file under another `scope` to create a second writer.
 
