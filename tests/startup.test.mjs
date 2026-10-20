@@ -22,15 +22,15 @@ for (const count of counts) test(`${count} agents coalesce metadata, clone cache
     await Promise.all(agents.map(a=>sessions.call(sessionId,a.lease,'read_skill',{path:'execute.md'})));await sessions.schema(sessionId);expect(messages).toHaveLength(5);
   }finally{await fs.rm(directory,{recursive:true,force:true})}
 });
-test('begin and call wait for editor readiness, while timeout sends no request', async()=>{
+test('begin responds immediately while only calls wait for readiness or timeout', async()=>{
  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'pencil-wait-'));
  try{
   const file=path.join(directory,'document.pen');await fs.writeFile(file,'opaque');const sessions=new Sessions({editorWaitTimeout:30});const{sessionId}=await sessions.open(file,'scope');
-  const early=sessions.acquire(sessionId,'early');const messages=[];const call=sessions.call(sessionId,early.lease,'get_app_state');const begin=sessions.begin(sessionId,'new');
+  const early=sessions.acquire(sessionId,'early');const messages=[];const call=sessions.call(sessionId,early.lease,'get_app_state');const begin=sessions.begin(sessionId,'new');expect(begin.lease).toBeString();
   const{generation}=sessions.attach(sessionId,m=>messages.push(m),{ready:false});await new Promise(r=>setTimeout(r,5));expect(messages).toHaveLength(0);
   sessions.ready(sessionId,generation);await begin;await new Promise(r=>setTimeout(r,0));expect(messages).toHaveLength(1);sessions.reply(sessionId,generation,{id:messages[0].id,payload:{}});await call;
   sessions.detach(sessionId,generation);
-  await expect(sessions.begin(sessionId,'late')).rejects.toMatchObject({code:'EDITOR_OFFLINE'});
+  expect(sessions.begin(sessionId,'late').lease).toBeString();
   await expect(sessions.call(sessionId,early.lease,'get_app_state')).rejects.toMatchObject({code:'EDITOR_OFFLINE'});
   expect(messages).toHaveLength(1);expect(sessions.status(sessionId).blocked).toBe(false);expect(sessions.status(sessionId).activeCalls).toBe(0);
  }finally{await fs.rm(directory,{recursive:true,force:true})}

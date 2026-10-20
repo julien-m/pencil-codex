@@ -9,8 +9,8 @@ export async function runInstalledAgent({hostFile,agent,input}){
  };
  const began=await tool('pencil_begin',{agent}),lease=began.structuredContent.lease;
  try{
-  const started=Date.now();
-  for(;;){try{await tool('pencil_tools',{});await tool('pencil_call',{lease,tool:'read_skill',arguments:{path:'execute.md'}});break}catch(e){if(!/EDITOR_OFFLINE|Moteur Pencil non connecté/.test(e.message)||Date.now()-started>20000)throw e;await new Promise(r=>setTimeout(r,250))}}
+  await tool('pencil_tools',{});
+  await tool('pencil_call',{lease,tool:'read_skill',arguments:{path:'execute.md'}});
   const result=await tool('pencil_call',{lease,tool:'execute',arguments:{filePath:'',description:`Create frame for ${agent}`,input}});
   const completedAt=Date.now(),status=await tool('pencil_status',{});
   const receipt={agent,sessionId,openedAt:host.openedAt,firstModificationCompletedAt:completedAt,openToModificationMs:completedAt-host.openedAt,status:status.structuredContent,result};

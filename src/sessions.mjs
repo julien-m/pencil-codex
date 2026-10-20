@@ -2,6 +2,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { DEFAULT_EDITOR_WAIT_MS } from './config.mjs';
 import { writeNewFile, replaceDocument, exportDirectory, writeExportFile } from './artifacts.mjs';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
@@ -11,7 +12,7 @@ export class SessionError extends Error {
 const fail = (code, message) => { throw new SessionError(code, message); };
 
 export class Sessions {
-  constructor({ timeout = 15000, saveWaitTimeout = 5000, editorWaitTimeout = 20000, draftRoot = path.join(os.tmpdir(), 'pencil-panel-drafts') } = {}) { this.items = new Map(); this.timeout = timeout; this.saveWaitTimeout = saveWaitTimeout; this.editorWaitTimeout = editorWaitTimeout; this.draftRoot = draftRoot; }
+  constructor({ timeout = 15000, saveWaitTimeout = 5000, editorWaitTimeout = DEFAULT_EDITOR_WAIT_MS, draftRoot = path.join(os.tmpdir(), 'pencil-panel-drafts') } = {}) { this.items = new Map(); this.timeout = timeout; this.saveWaitTimeout = saveWaitTimeout; this.editorWaitTimeout = editorWaitTimeout; this.draftRoot = draftRoot; }
   get(id) { return this.items.get(id) ?? fail('SESSION_NOT_FOUND', 'Session inconnue'); }
   async open(filename, scope) {
     if (!path.isAbsolute(filename) || path.extname(filename).toLowerCase() !== '.pen') fail('INVALID_PATH', 'Un fichier .pen absolu est requis');
@@ -72,11 +73,7 @@ export class Sessions {
       s.connectionWaiters.add(finish);
     });
   }
-  async begin(id, agent, deadline = Date.now() + this.editorWaitTimeout) {
-    await this.waitForEditor(id, deadline);
-    if (!this.get(id).editorReady) return this.begin(id, agent, deadline);
-    return this.acquire(id, agent);
-  }
+  begin(id, agent) { return this.acquire(id, agent); }
   async metadata(id, key, operation, record, deadline = record?.editorDeadline ?? Date.now() + this.editorWaitTimeout) {
     await this.waitForEditor(id, deadline);
     const s = this.get(id), cache = s.metadataCache;

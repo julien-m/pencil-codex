@@ -2,7 +2,6 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { editorWaitTimeout } from './config.mjs';
 export const root = fileURLToPath(new URL('../', import.meta.url));
 export async function connectBroker(directory = process.env.PLUGIN_DATA ?? path.join(root, '.runtime')) {
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
@@ -11,8 +10,10 @@ export async function connectBroker(directory = process.env.PLUGIN_DATA ?? path.
     try {
       const info = JSON.parse(await fs.readFile(connection, 'utf8'));
       const response = await fetch(`http://127.0.0.1:${info.port}/rpc`, { method: 'POST', headers: { Authorization: `Bearer ${info.token}` }, body: JSON.stringify({ method: 'ping' }), signal: AbortSignal.timeout(1000) });
-      if (!response.ok || (await response.json()).result?.version !== '0.4.0') return null;
-      return info;
+      if (!response.ok) return null;
+      const advertised = (await response.json()).result;
+      if (advertised?.version !== '0.4.1' || !Number.isSafeInteger(advertised.rpcTimeoutMs) || advertised.rpcTimeoutMs <= 0 || advertised.rpcTimeoutMs > 2147483647) return null;
+      return { ...info, editorWaitTimeout: advertised.editorWaitTimeout, rpcTimeoutMs: advertised.rpcTimeoutMs };
     } catch { return null; }
   };
   let info = await read();
@@ -32,7 +33,7 @@ export async function connectBroker(directory = process.env.PLUGIN_DATA ?? path.
   return {
     ...info,
     async rpc(method, args = {}) {
-      const response = await fetch(`http://127.0.0.1:${info.port}/rpc`, { method: 'POST', headers: { Authorization: `Bearer ${info.token}` }, body: JSON.stringify({ method, args }), signal: AbortSignal.timeout(editorWaitTimeout() + 22000) });
+      const response = await fetch(`http://127.0.0.1:${info.port}/rpc`, { method: 'POST', headers: { Authorization: `Bearer ${info.token}` }, body: JSON.stringify({ method, args }), signal: AbortSignal.timeout(info.rpcTimeoutMs) });
       if (!response.ok) throw new Error(`Broker HTTP ${response.status}`);
       const data = await response.json();
       if (data.error) throw Object.assign(new Error(data.error.message), { code: data.error.code });

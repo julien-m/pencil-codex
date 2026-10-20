@@ -14,6 +14,15 @@ if(opened.isError)throw Error(JSON.stringify(opened));
 const sessionId=opened.structuredContent.sessionId, openedAt=Date.now();
 const resource=await client.readResource({uri:'ui://pencil-panel/editor-v1.html'});
 const events=[];
+if (process.env.PENCIL_PROBE_EMPTY === '1') {
+ void (async()=>{
+  const participant=await client.callTool({name:'pencil_begin',arguments:{sessionId,agent:'empty-document-check'}});
+  const lease=participant.structuredContent.lease;
+  const state=await client.callTool({name:'pencil_call',arguments:{sessionId,lease,tool:'get_app_state',arguments:{}}},undefined,{timeout:60000});
+  await fs.writeFile(path.join(outputDirectory,'empty-document-probe.json'),JSON.stringify(state,null,2));
+  await client.callTool({name:'pencil_end',arguments:{sessionId,lease}});
+ })().catch(error=>console.error('Empty document probe:',error.message));
+}
 const observer=`const Socket=window.WebSocket;window.WebSocket=class extends Socket{constructor(...args){super(...args);this.addEventListener('message',e=>{const m=JSON.parse(e.data);if(m.kind==='request')fetch('/events',{method:'POST',body:JSON.stringify({at:Date.now(),method:m.method,tool:m.payload?.name,path:m.payload?.arguments?.path})});});}};`;
 const html=resource.contents[0].text.replace('<script>',`<script>${observer}window.pencilPanelPreview=${JSON.stringify(opened._meta.editor)};</script><script>`);
 const server=http.createServer(async(req,res)=>{

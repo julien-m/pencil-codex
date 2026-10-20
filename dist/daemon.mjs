@@ -3740,6 +3740,14 @@ import * as fs2 from "node:fs/promises";
 import path2 from "node:path";
 import os from "node:os";
 
+// src/config.mjs
+var DEFAULT_EDITOR_WAIT_MS = 2e4;
+function editorWaitTimeout() {
+  const value = Number(process.env.PENCIL_EDITOR_WAIT_MS ?? DEFAULT_EDITOR_WAIT_MS);
+  if (!Number.isSafeInteger(value) || value < 0 || value > 2147483647 - 22e3) throw new Error("PENCIL_EDITOR_WAIT_MS must be a non-negative integer within the supported timer range");
+  return value;
+}
+
 // src/artifacts.mjs
 import * as fs from "node:fs/promises";
 import path from "node:path";
@@ -3838,7 +3846,7 @@ var fail = (code, message) => {
   throw new SessionError(code, message);
 };
 var Sessions = class {
-  constructor({ timeout = 15e3, saveWaitTimeout = 5e3, editorWaitTimeout: editorWaitTimeout2 = 2e4, draftRoot = path2.join(os.tmpdir(), "pencil-panel-drafts") } = {}) {
+  constructor({ timeout = 15e3, saveWaitTimeout = 5e3, editorWaitTimeout: editorWaitTimeout2 = DEFAULT_EDITOR_WAIT_MS, draftRoot = path2.join(os.tmpdir(), "pencil-panel-drafts") } = {}) {
     this.items = /* @__PURE__ */ new Map();
     this.timeout = timeout;
     this.saveWaitTimeout = saveWaitTimeout;
@@ -3928,9 +3936,7 @@ var Sessions = class {
       s.connectionWaiters.add(finish);
     });
   }
-  async begin(id, agent, deadline = Date.now() + this.editorWaitTimeout) {
-    await this.waitForEditor(id, deadline);
-    if (!this.get(id).editorReady) return this.begin(id, agent, deadline);
+  begin(id, agent) {
     return this.acquire(id, agent);
   }
   async metadata(id, key, operation, record, deadline = record?.editorDeadline ?? Date.now() + this.editorWaitTimeout) {
@@ -4300,7 +4306,7 @@ async function startBroker({ token = randomUUID3(), timeout, editorWaitTimeout: 
       }
       const { method, args = {} } = JSON.parse(raw);
       let result;
-      if (method === "ping") result = { version: "0.4.0" };
+      if (method === "ping") result = { version: "0.4.1", editorWaitTimeout: sessions.editorWaitTimeout, rpcTimeoutMs: sessions.editorWaitTimeout + sessions.timeout + sessions.saveWaitTimeout + 2e3 };
       else if (method === "open" || method === "new") {
         const filename = method === "new" ? await createDocument(args.path) : args.path;
         result = await sessions.open(filename, args.scope);
@@ -4417,13 +4423,6 @@ async function startBroker({ token = randomUUID3(), timeout, editorWaitTimeout: 
     server.closeAllConnections();
     await closed;
   } };
-}
-
-// src/config.mjs
-function editorWaitTimeout() {
-  const value = Number(process.env.PENCIL_EDITOR_WAIT_MS ?? 2e4);
-  if (!Number.isSafeInteger(value) || value < 0 || value > 2147483647 - 22e3) throw new Error("PENCIL_EDITOR_WAIT_MS must be a non-negative integer within the supported timer range");
-  return value;
 }
 
 // src/daemon.mjs
