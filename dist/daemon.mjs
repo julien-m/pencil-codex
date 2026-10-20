@@ -4306,7 +4306,7 @@ async function startBroker({ token = randomUUID3(), timeout, editorWaitTimeout: 
       }
       const { method, args = {} } = JSON.parse(raw);
       let result;
-      if (method === "ping") result = { version: "0.4.1", editorWaitTimeout: sessions.editorWaitTimeout, rpcTimeoutMs: sessions.editorWaitTimeout + sessions.timeout + sessions.saveWaitTimeout + 2e3 };
+      if (method === "ping") result = { version: "0.5.0", editorWaitTimeout: sessions.editorWaitTimeout, rpcTimeoutMs: sessions.editorWaitTimeout + sessions.timeout + sessions.saveWaitTimeout + 2e3 };
       else if (method === "open" || method === "new") {
         const filename = method === "new" ? await createDocument(args.path) : args.path;
         result = await sessions.open(filename, args.scope);

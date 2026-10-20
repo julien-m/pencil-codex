@@ -13,15 +13,19 @@ try {
   await client.connect(transport);
   const { tools } = await client.listTools();
   const opener = tools.find(x => x.name === 'pencil_open');
-  assert.equal(opener._meta.ui.resourceUri, 'ui://pencil-panel/editor-v1.html');
+  const bridge = tools.find(x => x.name === 'pencil_editor_bridge');
+  assert(bridge, 'The native panel needs an app-only MCP transport');
+  assert.deepEqual(bridge._meta.ui.visibility, ['app']);
+  assert.equal(opener._meta.ui.resourceUri, 'ui://pencil-panel/editor-v2.html');
   assert(!opener._meta['openai/ui']?.entrypoints);
   assert(opener.inputSchema.required.includes('path'));
   assert(!tools.some(x => x.name === 'pencil_attach_file'));
   assert(tools.some(x => x.name === 'pencil_save'));
-  const ui = await client.readResource({ uri: 'ui://pencil-panel/editor-v1.html' });
+  const ui = await client.readResource({ uri: 'ui://pencil-panel/editor-v2.html' });
   assert(ui.contents[0].text.includes('Éditeur Pencil'));
   assert(ui.contents[0].text.includes('id="save"'));
   assert.deepEqual(ui.contents[0]._meta.ui.csp.frameDomains, ['https://app.pen.dev']);
+  assert.deepEqual(ui.contents[0]._meta.ui.csp.connectDomains, []);
   const file = path.join(dir, 'scratch.pen'); await fs.writeFile(file, 'opaque');
   const opened = await client.callTool({ name: 'pencil_open', arguments: { path: file, scope: 'protocol' } });
   assert(opened.structuredContent.sessionId); assert(opened._meta.editor.editorToken); assert(!JSON.stringify(opened.structuredContent).includes('editorToken'));
@@ -39,6 +43,23 @@ try {
   assert(denied.isError && denied.content[0].text.includes('DOCUMENT_BUSY'));
   await Promise.all(participants.map(p=>client.callTool({name:'pencil_end',arguments:{sessionId,lease:p.structuredContent.lease}})));
   peer.terminate();
+  const native = await client.callTool({name:'pencil_new',arguments:{path:path.join(dir,'native.pen'),scope:'native'}});
+  const editor=native._meta.editor;
+  const bridgeCall=async arguments_=>{
+    const response=await client.callTool({name:'pencil_editor_bridge',arguments:arguments_});
+    assert(!response.isError,JSON.stringify(response));return response.structuredContent;
+  };
+  const {connectionId}=await bridgeCall({action:'connect',sessionId:editor.sessionId,editorToken:editor.editorToken});
+  const initial=await bridgeCall({action:'exchange',connectionId});
+  assert(initial.messages.some(m=>m.kind==='config'));
+  await bridgeCall({action:'exchange',connectionId,messages:[{kind:'ready'}]});
+  const joined=await client.callTool({name:'pencil_begin',arguments:{sessionId:editor.sessionId,agent:'native-check'}});
+  const nativeResult=client.callTool({name:'pencil_call',arguments:{sessionId:editor.sessionId,lease:joined.structuredContent.lease,tool:'get_app_state',arguments:{}}});
+  let request;
+  while(!request){const batch=await bridgeCall({action:'exchange',connectionId});request=batch.messages.find(m=>m.kind==='request');}
+  await bridgeCall({action:'exchange',connectionId,messages:[{kind:'response',id:request.id,payload:{content:[{type:'text',text:'native bridge response'}]}}]});
+  assert.equal((await nativeResult).content[0].text,'native bridge response');
+  await bridgeCall({action:'close',connectionId});
   console.log('MCP stdio: tool-driven opening, UI resource/CSP, session open/status passed');
 } finally {
   clearTimeout(timer); await client.close();

@@ -18,19 +18,21 @@ Read [the plugin manifest](plugin.json) for its identity, [the MCP configuration
 
 ## Status and requirements
 
-**The native Codex panel is not fully working in the host tested so far.** The MCP App opens, but its WebSocket connection to the local service fails with “Canal local inaccessible dans cet hôte”. Installing the plugin and passing its protocol tests do not establish that the native panel works in your host.
+**Native-panel validation is pending for version 0.5.0.** The native view now uses the standard MCP Apps host bridge (`app.callServerTool`), rather than opening a loopback WebSocket from its iframe. The Node server relays messages to the existing authenticated local service. This addresses the direct-network dependency observed in earlier versions; passing transport tests does not establish that the native panel opens and works in your Codex host.
 
-The installed editor resource was validated in a local browser against the real hosted engine. Three model sub-agents independently created their own frames in one initially empty document; the shared document was saved and captured. Scripted fixtures test transport mechanics and are not independent agents. Automated transport tests separately verify overlapping requests. Read [the installed-validation report](docs/installed-validation.md) for measurements and limitations. Opening the same document under another session scope remains rejected with `DOCUMENT_BUSY`.
+The version 0.4.1 installed editor resource was validated in a local browser against the real hosted engine. Three model sub-agents independently created their own frames in one initially empty document; the shared document was saved and captured. Scripted fixtures test transport mechanics and are not independent agents. Automated transport tests separately verify overlapping requests. Read [the installed-validation report](docs/installed-validation.md) for measurements and limitations. Opening the same document under another session scope remains rejected with `DOCUMENT_BUSY`.
 
 Requirements:
 
 - Codex with plugin and MCP Apps support.
 - Node.js 22 or later.
 - Network access to the hosted Pencil editor at `https://app.pen.dev/new?embed`.
-- A host that permits the embedded pen.dev frame and connections to the loopback service.
+- A host that permits the embedded pen.dev frame and MCP Apps server-tool calls.
 - Bun for development and tests only.
 
 The plugin does not redistribute the proprietary Pencil engine and does not work offline.
+
+The native view declares no direct connection domains. Its internal `pencil_editor_bridge` tool is visible only to the app and uses a private, expiring connection capability after authenticating the session grant. A bridge failure stops the channel without replaying messages or falling back to a browser. The standalone development preview retains its direct WebSocket transport.
 
 ## Installation
 
@@ -39,7 +41,7 @@ codex plugin marketplace add julien-m/pencil-codex
 codex plugin add pencil@pencil
 ```
 
-The installable bundles are included in Git, so installation does not require a compiler or a local `node_modules` directory. Reload plugins or start a new conversation if the tools are not available in an existing conversation. Keep the native-panel limitation above in mind.
+The installable bundles are included in Git, so installation does not require a compiler or a local `node_modules` directory. If an existing conversation does not expose the installed tools, restart Codex and resume the conversation; no slash reload command is provided by this plugin. Keep the native-panel limitation above in mind.
 
 ## Development and validation
 

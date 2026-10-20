@@ -12,7 +12,7 @@ await client.connect(new StdioClientTransport({command:process.execPath,args:[pa
 const opened=await client.callTool({name:'pencil_new',arguments:{path:path.join(outputDirectory,'document.pen'),scope:label}});
 if(opened.isError)throw Error(JSON.stringify(opened));
 const sessionId=opened.structuredContent.sessionId, openedAt=Date.now();
-const resource=await client.readResource({uri:'ui://pencil-panel/editor-v1.html'});
+const resource=await client.readResource({uri:'ui://pencil-panel/editor-v2.html'});
 const events=[];
 if (process.env.PENCIL_PROBE_EMPTY === '1') {
  void (async()=>{

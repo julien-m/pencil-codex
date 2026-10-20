@@ -5,9 +5,11 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { connectBroker, root } from './client.mjs';
+import { UiRelay } from './ui-relay.mjs';
 
-const server = new McpServer({ name: 'pencil-panel', version: '0.4.1' });
-const resource = 'ui://pencil-panel/editor-v1.html';
+const server = new McpServer({ name: 'pencil-panel', version: '0.5.0' });
+const resource = 'ui://pencil-panel/editor-v2.html';
+const uiRelay = new UiRelay();
 const defaultScope = process.env.CODEX_THREAD_ID ?? `client-${randomUUID()}`;
 let broker;
 const backend = async () => broker ??= await connectBroker();
@@ -22,9 +24,22 @@ async function open(filename, scope, method = 'open') {
   return { ...object(session), _meta: { editor: { sessionId: session.sessionId, port: b.port, editorToken } } };
 }
 server.registerResource('pencil-editor', resource, {}, async () => {
-  const b = await backend();
-  return { contents: [{ uri: resource, mimeType: 'text/html;profile=mcp-app', text: await readFile(path.join(root, 'dist/editor.html'), 'utf8'), _meta: { ui: { csp: { connectDomains: [`http://127.0.0.1:${b.port}`, `ws://127.0.0.1:${b.port}`], frameDomains: ['https://app.pen.dev'] } }, 'openai/ui': { availableDisplayModes: ['fullscreen'], preferredDisplayMode: 'fullscreen' } } }] };
+  return { contents: [{ uri: resource, mimeType: 'text/html;profile=mcp-app', text: await readFile(path.join(root, 'dist/editor.html'), 'utf8'), _meta: { ui: { csp: { connectDomains: [], frameDomains: ['https://app.pen.dev'] } }, 'openai/ui': { availableDisplayModes: ['fullscreen'], preferredDisplayMode: 'fullscreen' } } }] };
 });
+server.registerTool('pencil_editor_bridge', {
+  description: 'Internal editor transport for the Pencil MCP App.',
+  inputSchema: { action: z.enum(['connect', 'exchange', 'close']), sessionId: z.string().uuid().optional(), editorToken: z.string().uuid().optional(), connectionId: z.string().uuid().optional(), messages: z.array(z.record(z.string(), z.unknown())).optional() },
+  _meta: { ui: { visibility: ['app'] } }
+}, wrap(async args => {
+  if (args.action === 'connect') {
+    if (!args.sessionId || !args.editorToken) throw new Error('Editor grant required');
+    const b = await backend();
+    return object(await uiRelay.connect({ port: b.port, sessionId: args.sessionId, editorToken: args.editorToken }));
+  }
+  if (!args.connectionId) throw new Error('Editor connection required');
+  if (args.action === 'close') { uiRelay.close(args.connectionId); return object({ closed: true }); }
+  return object(await uiRelay.exchange(args.connectionId, args.messages));
+}));
 server.registerTool('pencil_open', {
   title: 'Ouvrir Pencil', description: 'Ouvrir un fichier .pen dans le panneau Pencil sans chat. scope identifie la session de design ; transmettre le sessionId aux autres agents pour partager le document. Les agents peuvent rejoindre la session pendant le chargement : begin rejoint immédiatement la session ; seuls les appels au moteur attendent sa disponibilité.',
   inputSchema: { path: z.string().min(1), scope: z.string().max(200).optional() },

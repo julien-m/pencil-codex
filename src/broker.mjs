@@ -20,7 +20,7 @@ export async function startBroker({ token = randomUUID(), timeout, editorWaitTim
       for await (const chunk of req) { raw += chunk; if (raw.length > 40 * 1024 * 1024) throw new Error('Request too large'); }
       const { method, args = {} } = JSON.parse(raw);
       let result;
-      if (method === 'ping') result = { version: '0.4.1', editorWaitTimeout: sessions.editorWaitTimeout, rpcTimeoutMs: sessions.editorWaitTimeout + sessions.timeout + sessions.saveWaitTimeout + 2000 };
+      if (method === 'ping') result = { version: '0.5.0', editorWaitTimeout: sessions.editorWaitTimeout, rpcTimeoutMs: sessions.editorWaitTimeout + sessions.timeout + sessions.saveWaitTimeout + 2000 };
       else if (method === 'open' || method === 'new') {
         const filename = method === 'new' ? await createDocument(args.path) : args.path;
         result = await sessions.open(filename, args.scope);

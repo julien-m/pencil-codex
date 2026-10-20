@@ -1,4 +1,5 @@
 import { App } from '@modelcontextprotocol/ext-apps';
+import { createMcpTransport } from './mcp-transport.mjs';
 const status = document.querySelector('#status');
 const frame = document.querySelector('iframe');
 const saveButton = document.querySelector('#save');
@@ -25,8 +26,7 @@ function connectEditor() {
 function start(editor) {
   if (started) return; started = true;
   show('Connexion au canal de la session…');
-  socket = new WebSocket(`ws://127.0.0.1:${editor.port}/editor?session=${encodeURIComponent(editor.sessionId)}&token=${encodeURIComponent(editor.editorToken)}`);
-  socket.onmessage = event => {
+  const onmessage = event => {
     const m = JSON.parse(event.data);
     if (m.kind === 'activity') {
       const agents = m.status.agents ?? [];
@@ -54,8 +54,12 @@ function start(editor) {
       port?.postMessage({ ...m, kind: 'response' });
     }
   };
-  socket.onclose = () => { saveButton.disabled = true; clearInterval(timer); port?.close(); show('Canal déconnecté · ne pas rejouer les modifications'); };
-  socket.onerror = () => show('Canal local inaccessible dans cet hôte');
+  const onclose = () => { saveButton.disabled = true; clearInterval(timer); port?.close(); show('Canal déconnecté · ne pas rejouer les modifications'); };
+  const onerror = error => show(`Canal Pencil : ${error?.message ?? 'connexion indisponible'}`);
+  if (window.pencilPanelPreview) {
+    socket = new WebSocket(`ws://127.0.0.1:${editor.port}/editor?session=${encodeURIComponent(editor.sessionId)}&token=${encodeURIComponent(editor.editorToken)}`);
+    Object.assign(socket, { onmessage, onclose, onerror });
+  } else socket = createMcpTransport(app, editor, { onmessage, onclose, onerror });
 }
 saveButton.addEventListener('click', () => {
   if (!connected || socket?.readyState !== 1) return;
@@ -67,7 +71,8 @@ frame.src = 'https://app.pen.dev/new?embed';
 window.pencilPanelState = 'loading';
 if (window.pencilPanelPreview) start(window.pencilPanelPreview);
 else {
-  app = new App({ name: 'Pencil', version: '0.4.1' }, { availableDisplayModes: ['fullscreen'] });
+  app = new App({ name: 'Pencil', version: '0.5.0' }, { availableDisplayModes: ['fullscreen'] });
   app.ontoolresult = result => { if (result._meta?.editor) start(result._meta.editor); };
+  app.onteardown = async () => { await socket?.close(); return {}; };
   app.connect().catch(e => show(`Hôte MCP Apps : ${e.message}`));
 }

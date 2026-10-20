@@ -2,6 +2,8 @@
 
 Validation performed on 2026-10-20 with Node.js and the real hosted Pencil engine.
 
+This report covers version 0.4.1. Version 0.5.0 changes the native transport to the MCP Apps host bridge. Its automated transport checks pass, but a real native-panel opening and editing test is still pending; the browser measurements below do not certify that path.
+
 ## Installation and execution
 
 - Baseline: version 0.3.1 after reverting the scenario-specific launcher.
