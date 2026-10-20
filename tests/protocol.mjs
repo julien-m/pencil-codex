@@ -1,3 +1,4 @@
+import { WebSocket } from 'ws';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { strict as assert } from 'node:assert';
@@ -27,13 +28,17 @@ try {
   const status = await client.callTool({ name: 'pencil_status', arguments: { sessionId: opened.structuredContent.sessionId } });
   assert.equal(status.structuredContent.connected, false);
   const sessionId=opened.structuredContent.sessionId;
-  const participants=await Promise.all(['A','B'].map(agent=>client.callTool({name:'pencil_begin',arguments:{sessionId,agent}})));
+  const peer=new WebSocket(`ws://127.0.0.1:${opened._meta.editor.port}/editor?session=${sessionId}&token=${opened._meta.editor.editorToken}`);
+  await new Promise((resolve,reject)=>{peer.once('message',()=>{peer.send(JSON.stringify({kind:'ready'}));resolve()});peer.once('error',reject)});
+  const agents=Array.from({length:Number(process.env.PENCIL_TEST_AGENTS??6)},(_,i)=>`agent-${i}`);
+  const participants=await Promise.all(agents.map(agent=>client.callTool({name:'pencil_begin',arguments:{sessionId,agent}})));
   assert(participants.every(p=>!p.isError));
   const shared=await client.callTool({name:'pencil_status',arguments:{sessionId}});
-  assert.equal(shared.structuredContent.agents.length,2);
+  assert.equal(shared.structuredContent.agents.length,agents.length);
   const denied=await client.callTool({name:'pencil_open',arguments:{path:file,scope:'different-session'}});
   assert(denied.isError && denied.content[0].text.includes('DOCUMENT_BUSY'));
   await Promise.all(participants.map(p=>client.callTool({name:'pencil_end',arguments:{sessionId,lease:p.structuredContent.lease}})));
+  peer.terminate();
   console.log('MCP stdio: tool-driven opening, UI resource/CSP, session open/status passed');
 } finally {
   clearTimeout(timer); await client.close();

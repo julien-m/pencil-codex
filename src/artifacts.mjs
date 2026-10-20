@@ -42,7 +42,7 @@ export async function writeNewFile(filename, bytes) {
 
 export async function createDocument(filename) {
   if (path.extname(filename).toLowerCase() !== '.pen') throw new Error('Le nouveau document doit avoir l’extension .pen');
-  const content = JSON.stringify({ version: '2.6', children: [{ type: 'frame', id: randomUUID(), name: 'Maquette', width: 1440, height: 900, layout: 'vertical', gap: 16, alignItems: 'start', fill: '#FFFFFF' }] });
+  const content = JSON.stringify({ version: '2.6', children: [] });
   return writeNewFile(filename, Buffer.from(content));
 }
 

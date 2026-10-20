@@ -13,7 +13,7 @@ test('real loopback transport authenticates and routes one editor without broadc
     const sessions = [];
     for (const name of ['a', 'b']) {
       const file = path.join(dir, `${name}.pen`); await fs.writeFile(file, name); const s = await rpc('open', { path: file, scope: name }); sessions.push(s);
-      const peer = new WebSocket(`ws://127.0.0.1:${b.port}/editor?session=${s.sessionId}&token=${s.editorToken}`); peers.push(peer);
+      const peer = new WebSocket(`ws://127.0.0.1:${b.port}/editor?session=${s.sessionId}&token=${s.editorToken}`); peers.push(peer); peer.once('open',()=>peer.send(JSON.stringify({kind:'ready'})));
       await new Promise((resolve, reject) => { peer.once('message', resolve); peer.once('error', reject); });
       peer.on('message', bytes => { const m = JSON.parse(bytes); if (m.kind === 'request') peer.send(JSON.stringify({ kind: 'response', id: m.id, payload: { content: [{ type: 'text', text: name }] } })); });
     }
@@ -31,6 +31,7 @@ test('the editor Save button flushes over WebSocket and publishes the opened fil
     const { result: session } = await response.json();
     b.sessions.acquire(session.sessionId, 'Idle collaborator');
     peer = new WebSocket(`ws://127.0.0.1:${b.port}/editor?session=${session.sessionId}&token=${session.editorToken}`);
+    peer.once('open',()=>peer.send(JSON.stringify({kind:'ready'})));
     let saveRequest, schemaResult; let sawSchema = false;
     const saved = new Promise((resolve, reject) => {
       peer.on('error', reject);
@@ -80,6 +81,7 @@ test('one editor receives concurrent calls from two agents and routes out-of-ord
     await assert.rejects(rpc('open',{path:file,scope:'other'}),{code:'DOCUMENT_BUSY'});
     const requests=[], activity=[];
     peer=new WebSocket(`ws://127.0.0.1:${b.port}/editor?session=${session.sessionId}&token=${session.editorToken}`);
+    peer.once('open',()=>peer.send(JSON.stringify({kind:'ready'})));
     await new Promise((resolve,reject)=>{peer.once('message',resolve);peer.once('error',reject)});
     peer.on('message',raw=>{
       const m=JSON.parse(raw);
@@ -107,6 +109,7 @@ test('storage messages retain their arrival revision across the broker persisten
     // Allocate a normal editor grant over authenticated RPC.
     const opened=await (await fetch(`http://127.0.0.1:${b.port}/rpc`,{method:'POST',headers:{Authorization:`Bearer ${b.token}`},body:JSON.stringify({method:'open',args:{path:file,scope:'s'}})})).json();
     peer=new WebSocket(`ws://127.0.0.1:${b.port}/editor?session=${session.sessionId}&token=${opened.result.editorToken}`);
+    peer.once('open',()=>peer.send(JSON.stringify({kind:'ready'})));
     let generation;await new Promise((resolve,reject)=>{peer.once('error',reject);peer.once('message',raw=>{generation=JSON.parse(raw).generation;resolve()})});
     await b.sessions.storage(session.sessionId,generation,'storage-load');
     let entered;const writing=new Promise(resolve=>entered=resolve),gate=new Promise(resolve=>finishWrite=resolve);

@@ -3799,7 +3799,7 @@ async function writeNewFile(filename, bytes) {
 }
 async function createDocument(filename) {
   if (path.extname(filename).toLowerCase() !== ".pen") throw new Error("Le nouveau document doit avoir l\u2019extension .pen");
-  const content = JSON.stringify({ version: "2.6", children: [{ type: "frame", id: randomUUID(), name: "Maquette", width: 1440, height: 900, layout: "vertical", gap: 16, alignItems: "start", fill: "#FFFFFF" }] });
+  const content = JSON.stringify({ version: "2.6", children: [] });
   return writeNewFile(filename, Buffer.from(content));
 }
 async function exportDirectory(directory2) {
@@ -3838,10 +3838,11 @@ var fail = (code, message) => {
   throw new SessionError(code, message);
 };
 var Sessions = class {
-  constructor({ timeout = 15e3, saveWaitTimeout = 5e3, draftRoot = path2.join(os.tmpdir(), "pencil-panel-drafts") } = {}) {
+  constructor({ timeout = 15e3, saveWaitTimeout = 5e3, editorWaitTimeout: editorWaitTimeout2 = 2e4, draftRoot = path2.join(os.tmpdir(), "pencil-panel-drafts") } = {}) {
     this.items = /* @__PURE__ */ new Map();
     this.timeout = timeout;
     this.saveWaitTimeout = saveWaitTimeout;
+    this.editorWaitTimeout = editorWaitTimeout2;
     this.draftRoot = draftRoot;
   }
   get(id) {
@@ -3860,31 +3861,101 @@ var Sessions = class {
     }
     const id = randomUUID2();
     const draft = path2.join(this.draftRoot, `${digest(`${scope}:${file}`)}.pen`);
-    const s = { id, scope, file, draft, exportJobs: /* @__PURE__ */ new Map(), mutationRevision: 0, virtualRoot: `pencil/${id}/`, generation: 0, pending: /* @__PURE__ */ new Map(), agents: /* @__PURE__ */ new Map(), blocked: false, connected: false, savedHash: null, operations: 0, saveState: "not-loaded" };
+    const s = { id, scope, file, draft, openedAt: Date.now(), editorReady: false, connectionWaiters: /* @__PURE__ */ new Set(), metadataCache: /* @__PURE__ */ new Map(), metadataStats: { requests: 0, hits: 0 }, recentCalls: [], exportJobs: /* @__PURE__ */ new Map(), mutationRevision: 0, virtualRoot: `pencil/${id}/`, generation: 0, pending: /* @__PURE__ */ new Map(), agents: /* @__PURE__ */ new Map(), blocked: false, connected: false, savedHash: null, operations: 0, saveState: "not-loaded" };
     this.items.set(id, s);
     return this.status(id);
   }
   status(id) {
     const s = this.get(id);
-    return { sessionId: s.id, scope: s.scope, name: path2.basename(s.file), connected: s.connected, generation: s.generation, blocked: s.blocked, leaseOwner: [...s.agents.values()].map((a) => a.agent).join(", ") || null, agents: [...s.agents.values()].map((a) => ({ agent: a.agent, activeCalls: a.calls })), activeCalls: [...s.agents.values()].reduce((n, a) => n + a.calls, 0), saving: !!s.saving, operations: s.operations, saveState: s.saveState, draftPath: s.draft };
+    return { sessionId: s.id, scope: s.scope, name: path2.basename(s.file), connected: s.connected, editorReady: s.editorReady, metadataStats: { ...s.metadataStats }, openedAt: s.openedAt, readyAt: s.readyAt ?? null, recentCalls: s.recentCalls.map((c) => ({ ...c })), generation: s.generation, blocked: s.blocked, leaseOwner: [...s.agents.values()].map((a) => a.agent).join(", ") || null, agents: [...s.agents.values()].map((a) => ({ agent: a.agent, activeCalls: a.calls })), activeCalls: [...s.agents.values()].reduce((n, a) => n + a.calls, 0), saving: !!s.saving, operations: s.operations, saveState: s.saveState, draftPath: s.draft };
   }
-  attach(id, send) {
+  attach(id, send, { ready = true } = {}) {
     const s = this.get(id);
     if (s.connected) fail("EDITOR_ALREADY_CONNECTED", "Une vue est d\xE9j\xE0 attach\xE9e \xE0 cette session");
     if (s.blocked) fail("OUTCOME_UNKNOWN", "R\xE9conciliation requise avant de reconnecter cette session");
     s.generation += 1;
+    s.metadataCache.clear();
+    s.metadataStats = { requests: 0, hits: 0 };
     s.send = send;
     s.connected = true;
+    s.editorReady = false;
+    s.readyAt = null;
+    if (ready) this.ready(id, s.generation);
     return { generation: s.generation, fileURI: `file:///${s.virtualRoot}${encodeURIComponent(path2.basename(s.file))}` };
   }
   detach(id, generation) {
     const s = this.get(id);
     if (generation !== s.generation) return;
     s.connected = false;
+    s.editorReady = false;
     s.send = void 0;
+    s.metadataCache.clear();
     for (const p of s.pending.values()) p.reject(new SessionError("OUTCOME_UNKNOWN", "Connexion perdue pendant un appel"));
     if (s.pending.size) s.blocked = true;
     s.pending.clear();
+    if (s.blocked) for (const resume of [...s.connectionWaiters]) resume();
+  }
+  ready(id, generation) {
+    const s = this.get(id);
+    if (!s.connected || generation !== s.generation) return false;
+    s.editorReady = true;
+    s.readyAt = Date.now();
+    for (const resume of [...s.connectionWaiters]) resume();
+    return true;
+  }
+  async waitForEditor(id, deadline = Date.now() + this.editorWaitTimeout) {
+    const s = this.get(id);
+    if (s.blocked) fail("OUTCOME_UNKNOWN", "Session bloqu\xE9e ; ne pas rejouer les mutations");
+    if (s.connected && s.editorReady) return;
+    await new Promise((resolve, reject) => {
+      const finish = () => {
+        if (s.blocked) {
+          cleanup();
+          reject(new SessionError("OUTCOME_UNKNOWN", "Session bloqu\xE9e"));
+        } else if (s.connected && s.editorReady) {
+          cleanup();
+          resolve();
+        }
+      };
+      const cleanup = () => {
+        clearTimeout(timer);
+        s.connectionWaiters.delete(finish);
+      };
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new SessionError("EDITOR_OFFLINE", "\xC9diteur non connect\xE9 dans le d\xE9lai configur\xE9"));
+      }, Math.max(0, deadline - Date.now()));
+      s.connectionWaiters.add(finish);
+    });
+  }
+  async begin(id, agent, deadline = Date.now() + this.editorWaitTimeout) {
+    await this.waitForEditor(id, deadline);
+    if (!this.get(id).editorReady) return this.begin(id, agent, deadline);
+    return this.acquire(id, agent);
+  }
+  async metadata(id, key, operation, record, deadline = record?.editorDeadline ?? Date.now() + this.editorWaitTimeout) {
+    await this.waitForEditor(id, deadline);
+    const s = this.get(id), cache = s.metadataCache;
+    if (s.saving) return this.afterSave(id, () => this.metadata(id, key, operation, record, deadline));
+    if (cache.has(key)) {
+      s.metadataStats.hits += 1;
+      if (record) record.cacheHit = true;
+    } else {
+      s.metadataStats.requests += 1;
+      const pending = Promise.resolve().then(operation).then((result) => {
+        if (result?.isError) cache.delete(key);
+        return result;
+      }).catch((error) => {
+        cache.delete(key);
+        throw error;
+      });
+      cache.set(key, pending);
+    }
+    return structuredClone(await cache.get(key));
+  }
+  schema(id) {
+    const deadline = Date.now() + this.editorWaitTimeout;
+    return this.metadata(id, "schema", () => this.request(id, "get-mcp-schema", void 0, void 0, deadline), void 0, deadline);
   }
   acquire(id, agent) {
     const s = this.get(id);
@@ -3923,8 +3994,14 @@ var Sessions = class {
     participant.calls += 1;
     const mutation = name === "execute" && !observational;
     let result;
+    const record = { agent: participant.agent, tool: name, requestedAt: Date.now(), editorDeadline: Date.now() + this.editorWaitTimeout, generation: s.generation };
+    s.recentCalls.push(record);
+    if (s.recentCalls.length > 100) s.recentCalls.shift();
+    const dispatch = () => {
+      return this.request(id, "mcp-tool-call", { name, arguments: args }, record);
+    };
     try {
-      result = this.request(id, "mcp-tool-call", { name, arguments: args });
+      result = name === "read_skill" ? this.metadata(id, `read_skill:${args.path ?? ""}`, dispatch, record) : !s.editorReady ? this.waitForEditor(id, record.editorDeadline).then(dispatch) : dispatch();
     } catch (error) {
       participant.calls -= 1;
       throw error;
@@ -3932,10 +4009,16 @@ var Sessions = class {
     this.onActivity?.(id);
     return result.then((response) => {
       s.operations += 1;
+      record.completedAt = Date.now();
+      record.isError = !!response?.isError;
       return response;
+    }).catch((error) => {
+      record.error = error.code ?? "ERROR";
+      throw error;
     }).finally(() => {
       participant.calls -= 1;
-      if (mutation) {
+      record.finishedAt = Date.now();
+      if (mutation && record.dispatchedAt) {
         s.mutationRevision += 1;
         if (s.saveState !== "conflict") s.saveState = "check-required";
       }
@@ -3959,11 +4042,15 @@ var Sessions = class {
     if (s.blocked) fail("OUTCOME_UNKNOWN", "Session bloqu\xE9e ; ne pas rejouer les mutations");
     return operation();
   }
-  request(id, method, payload) {
+  request(id, method, payload, record, deadline = record?.editorDeadline ?? Date.now() + this.editorWaitTimeout) {
     const s = this.get(id);
-    if (s.saving && method !== "save") return this.afterSave(id, () => this.request(id, method, payload));
+    if (s.saving && method !== "save") return this.afterSave(id, () => this.request(id, method, payload, record, deadline));
     if (s.blocked) fail("OUTCOME_UNKNOWN", "Session bloqu\xE9e ; ne pas rejouer les mutations");
-    if (!s.connected) fail("EDITOR_OFFLINE", "Ouvrir le fichier .pen dans le panneau et attendre le moteur");
+    if (!s.connected || !s.editorReady) return this.waitForEditor(id, deadline).then(() => this.request(id, method, payload, record, deadline));
+    if (record) {
+      record.dispatchedAt = Date.now();
+      record.generation = s.generation;
+    }
     const requestId = randomUUID2();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -4193,8 +4280,8 @@ var same = (a, b) => {
   const left = Buffer.from(a), right = Buffer.from(b);
   return left.length === right.length && timingSafeEqual(left, right);
 };
-async function startBroker({ token = randomUUID3(), timeout, draftRoot } = {}) {
-  const sessions = new Sessions({ timeout, draftRoot }), views = /* @__PURE__ */ new Map();
+async function startBroker({ token = randomUUID3(), timeout, editorWaitTimeout: editorWaitTimeout2, draftRoot } = {}) {
+  const sessions = new Sessions({ timeout, editorWaitTimeout: editorWaitTimeout2, draftRoot }), views = /* @__PURE__ */ new Map();
   const server = http.createServer(async (req, res) => {
     res.setHeader("Content-Type", "application/json");
     if (!same(req.headers.authorization, `Bearer ${token}`)) {
@@ -4213,16 +4300,16 @@ async function startBroker({ token = randomUUID3(), timeout, draftRoot } = {}) {
       }
       const { method, args = {} } = JSON.parse(raw);
       let result;
-      if (method === "ping") result = { version: "0.3.1" };
+      if (method === "ping") result = { version: "0.4.0" };
       else if (method === "open" || method === "new") {
         const filename = method === "new" ? await createDocument(args.path) : args.path;
         result = await sessions.open(filename, args.scope);
         if (!views.has(result.sessionId)) views.set(result.sessionId, randomUUID3());
         result = { ...result, editorToken: views.get(result.sessionId) };
-      } else if (method === "schema") result = await sessions.request(args.sessionId, "get-mcp-schema");
+      } else if (method === "schema") result = await sessions.schema(args.sessionId);
       else if (method === "status") result = sessions.status(args.sessionId);
       else if (method === "acquire") {
-        result = sessions.acquire(args.sessionId, args.agent);
+        result = await sessions.begin(args.sessionId, args.agent);
         broadcast(args.sessionId);
       } else if (method === "release") {
         result = sessions.release(args.sessionId, args.lease);
@@ -4262,7 +4349,7 @@ async function startBroker({ token = randomUUID3(), timeout, draftRoot } = {}) {
       let generation;
       peer.sessionId = id;
       try {
-        const config = sessions.attach(id, (message) => peer.send(JSON.stringify(message)));
+        const config = sessions.attach(id, (message) => peer.send(JSON.stringify(message)), { ready: false });
         generation = config.generation;
         peer.send(JSON.stringify({ kind: "config", ...config }));
       } catch (e) {
@@ -4273,7 +4360,10 @@ async function startBroker({ token = randomUUID3(), timeout, draftRoot } = {}) {
       peer.on("message", (bytes) => {
         try {
           const message = JSON.parse(bytes.toString());
-          if (message.kind === "response") sessions.reply(id, generation, message);
+          if (message.kind === "ready") {
+            sessions.ready(id, generation);
+            broadcast(id);
+          } else if (message.kind === "response") sessions.reply(id, generation, message);
           else if (message.kind === "save") {
             void (async () => {
               let lease;
@@ -4329,11 +4419,18 @@ async function startBroker({ token = randomUUID3(), timeout, draftRoot } = {}) {
   } };
 }
 
+// src/config.mjs
+function editorWaitTimeout() {
+  const value = Number(process.env.PENCIL_EDITOR_WAIT_MS ?? 2e4);
+  if (!Number.isSafeInteger(value) || value < 0 || value > 2147483647 - 22e3) throw new Error("PENCIL_EDITOR_WAIT_MS must be a non-negative integer within the supported timer range");
+  return value;
+}
+
 // src/daemon.mjs
 import * as fs3 from "node:fs/promises";
 import path3 from "node:path";
 var directory = process.argv[2];
-var broker = await startBroker({ draftRoot: path3.join(directory, "drafts") });
+var broker = await startBroker({ editorWaitTimeout: editorWaitTimeout(), draftRoot: path3.join(directory, "drafts") });
 await fs3.writeFile(path3.join(directory, "connection.json"), JSON.stringify({ port: broker.port, token: broker.token, pid: process.pid }), { mode: 384 });
 async function shutdown() {
   await fs3.unlink(path3.join(directory, "connection.json")).catch(() => {

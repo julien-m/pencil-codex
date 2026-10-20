@@ -9,8 +9,8 @@ const same = (a, b) => {
   const left = Buffer.from(a), right = Buffer.from(b);
   return left.length === right.length && timingSafeEqual(left, right);
 };
-export async function startBroker({ token = randomUUID(), timeout, draftRoot } = {}) {
-  const sessions = new Sessions({ timeout, draftRoot }), views = new Map();
+export async function startBroker({ token = randomUUID(), timeout, editorWaitTimeout, draftRoot } = {}) {
+  const sessions = new Sessions({ timeout, editorWaitTimeout, draftRoot }), views = new Map();
   const server = http.createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     if (!same(req.headers.authorization, `Bearer ${token}`)) { res.writeHead(401).end('{}'); return; }
@@ -20,15 +20,15 @@ export async function startBroker({ token = randomUUID(), timeout, draftRoot } =
       for await (const chunk of req) { raw += chunk; if (raw.length > 40 * 1024 * 1024) throw new Error('Request too large'); }
       const { method, args = {} } = JSON.parse(raw);
       let result;
-      if (method === 'ping') result = { version: '0.3.1' };
+      if (method === 'ping') result = { version: '0.4.0' };
       else if (method === 'open' || method === 'new') {
         const filename = method === 'new' ? await createDocument(args.path) : args.path;
         result = await sessions.open(filename, args.scope);
         if (!views.has(result.sessionId)) views.set(result.sessionId, randomUUID());
         result = { ...result, editorToken: views.get(result.sessionId) };
-      } else if (method === 'schema') result = await sessions.request(args.sessionId, 'get-mcp-schema');
+      } else if (method === 'schema') result = await sessions.schema(args.sessionId);
       else if (method === 'status') result = sessions.status(args.sessionId);
-      else if (method === 'acquire') { result = sessions.acquire(args.sessionId, args.agent); broadcast(args.sessionId); }
+      else if (method === 'acquire') { result = await sessions.begin(args.sessionId, args.agent); broadcast(args.sessionId); }
       else if (method === 'release') { result = sessions.release(args.sessionId, args.lease); broadcast(args.sessionId); }
       else if (method === 'call') result = await sessions.call(args.sessionId, args.lease, args.tool, args.arguments);
       else if (method === 'capture') result = await sessions.capture(args.sessionId, args.lease, args.nodeIds, args.directory);
@@ -51,14 +51,15 @@ export async function startBroker({ token = randomUUID(), timeout, draftRoot } =
       let generation;
       peer.sessionId = id;
       try {
-        const config = sessions.attach(id, message => peer.send(JSON.stringify(message)));
+        const config = sessions.attach(id, message => peer.send(JSON.stringify(message)), { ready: false });
         generation = config.generation;
         peer.send(JSON.stringify({ kind: 'config', ...config }));
       } catch (e) { peer.send(JSON.stringify({ kind: 'fatal', message: e.message })); peer.close(); return; }
       peer.on('message', bytes => {
         try {
           const message = JSON.parse(bytes.toString());
-          if (message.kind === 'response') sessions.reply(id, generation, message);
+          if (message.kind === 'ready') { sessions.ready(id, generation); broadcast(id); }
+          else if (message.kind === 'response') sessions.reply(id, generation, message);
           else if (message.kind === 'save') {
             void (async () => {
               let lease;

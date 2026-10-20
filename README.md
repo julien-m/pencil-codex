@@ -72,13 +72,23 @@ The build generates `dist/server.mjs`, `dist/daemon.mjs`, `dist/editor.html` and
 ## Usage
 
 1. Ask the agent to use the installed Pencil plugin. Call `pencil_open` with an absolute file path and an explicit design-session `scope`, or call `pencil_new` to create a document. The tool returns its UI resource; rendering and connecting that resource depend on the host.
-2. Wait for the editor to connect. Call `pencil_tools` to discover the native schemas, then load the native instructions through `pencil_call` with `read_skill`.
+2. Launch collaborating agents while the view opens. `pencil_begin` and `pencil_call` wait for the engine; call `pencil_tools` to discover the native schemas, then load the native instructions through `pencil_call` with `read_skill`.
 3. Each agent calls `pencil_begin` to join, uses its own returned `lease` with `pencil_call`, then leaves with `pencil_end`. The legacy field name `lease` now identifies a non-exclusive participation token. Agents can join and send requests at the same time; one agent leaving does not end the others’ participation.
 4. Give every agent collaborating on that document the same returned `sessionId`. Do not open the same file under another `scope` to create a second writer.
+
+New documents start empty. Each agent creates its own frame in its first `execute`, using an orchestrator-assigned position or `FindEmptySpace`. Screen count, names, dimensions, colors and content come from the task, never a prepared scenario. Read [the plugin skill](skills/pencil/SKILL.md) before coordinating agents.
 
 Implicit scopes use `CODEX_THREAD_ID` when available, otherwise the MCP process identity. This is not a guaranteed native conversation identifier: agents must explicitly share the returned `sessionId`. The `agent` field is an activity label, not an authenticated identity.
 
 The plugin opens documents only through `pencil_open` or `pencil_new`. It does not register an automatic `.pen` file association.
+
+## Startup and session metadata
+
+`PENCIL_EDITOR_WAIT_MS` sets the maximum editor readiness wait in milliseconds (default 20000). Agents can join and issue calls during view loading. Expiration returns `EDITOR_OFFLINE` without sending a mutation. The readiness signal is the hosted engine bridge handshake, rather than just an open WebSocket.
+
+Concurrent `read_skill` requests for the same path share one channel round trip, then receive independent copies of the cached response. Tool schemas use the same session cache. A reconnect creates a new engine generation and invalidates both caches. Errors are not cached. This removes repeated metadata requests; it does not shorten loading of the hosted Pencil engine or language-model preparation.
+
+`pencil_status` exposes `openedAt`, `readyAt`, generation-local metadata counters and bounded `recentCalls` with request, dispatch and completion timestamps. Cache hits have no channel dispatch timestamp. Measure the installed `dist/` server from a clean clone without development dependencies; demonstration data belongs only in examples and test fixtures.
 
 ## Save, captures and exports
 

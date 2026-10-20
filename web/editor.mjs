@@ -11,7 +11,7 @@ function connectEditor() {
   const channel = new MessageChannel(); port = channel.port1;
   port.onmessage = event => {
     const m = event.data;
-    if (m.kind === 'ready') { connected = true; saveButton.disabled = false; clearInterval(timer); show('Canal connecté · chargement du moteur'); window.pencilPanelState = 'bridge-ready'; return; }
+    if (m.kind === 'ready') { socket.send(JSON.stringify({ kind: 'ready' })); connected = true; saveButton.disabled = false; clearInterval(timer); show('Canal connecté · chargement du moteur'); window.pencilPanelState = 'bridge-ready'; return; }
     if (m.kind === 'error') { show(`Pencil : ${m.message}`); return; }
     if (m.kind === 'request') {
       const payload = m.payload;
@@ -67,7 +67,7 @@ frame.src = 'https://app.pen.dev/new?embed';
 window.pencilPanelState = 'loading';
 if (window.pencilPanelPreview) start(window.pencilPanelPreview);
 else {
-  app = new App({ name: 'Pencil', version: '0.3.1' }, { availableDisplayModes: ['fullscreen'] });
+  app = new App({ name: 'Pencil', version: '0.4.0' }, { availableDisplayModes: ['fullscreen'] });
   app.ontoolresult = result => { if (result._meta?.editor) start(result._meta.editor); };
   app.connect().catch(e => show(`Hôte MCP Apps : ${e.message}`));
 }

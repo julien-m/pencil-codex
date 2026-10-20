@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { connectBroker, root } from './client.mjs';
 
-const server = new McpServer({ name: 'pencil-panel', version: '0.3.1' });
+const server = new McpServer({ name: 'pencil-panel', version: '0.4.0' });
 const resource = 'ui://pencil-panel/editor-v1.html';
 const defaultScope = process.env.CODEX_THREAD_ID ?? `client-${randomUUID()}`;
 let broker;
@@ -26,7 +26,7 @@ server.registerResource('pencil-editor', resource, {}, async () => {
   return { contents: [{ uri: resource, mimeType: 'text/html;profile=mcp-app', text: await readFile(path.join(root, 'dist/editor.html'), 'utf8'), _meta: { ui: { csp: { connectDomains: [`http://127.0.0.1:${b.port}`, `ws://127.0.0.1:${b.port}`], frameDomains: ['https://app.pen.dev'] } }, 'openai/ui': { availableDisplayModes: ['fullscreen'], preferredDisplayMode: 'fullscreen' } } }] };
 });
 server.registerTool('pencil_open', {
-  title: 'Ouvrir Pencil', description: 'Ouvrir un fichier .pen dans le panneau Pencil sans chat. scope identifie la session de design ; transmettre le sessionId aux autres agents pour partager le document. Attendre la connexion de la vue avant les opérations.',
+  title: 'Ouvrir Pencil', description: 'Ouvrir un fichier .pen dans le panneau Pencil sans chat. scope identifie la session de design ; transmettre le sessionId aux autres agents pour partager le document. Les agents peuvent rejoindre la session pendant le chargement : begin et call attendent le moteur dans le délai configuré.',
   inputSchema: { path: z.string().min(1), scope: z.string().max(200).optional() },
   _meta: { ui: { resourceUri: resource } },
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true }
@@ -40,9 +40,9 @@ server.registerTool('pencil_export', { description: 'Exporter les nœuds sélect
 server.registerTool('pencil_save_as', { description: 'Enregistrer le dernier snapshot acquitté dans un NOUVEAU fichier .pen au chemin choisi. Utiliser un snapshot acquitté (draft-saved, source-saved ou conflict) dans pencil_status ; aucun écrasement ni basculement implicite de document.', inputSchema: { sessionId: id, lease: id, path: z.string() } }, wrap(async args => object(await (await backend()).rpc('save-as', args))));
 server.registerTool('pencil_tools', { description: 'Découvrir les schémas natifs publiés par le moteur de cette session ; respecter ces schémas avant pencil_call.', inputSchema: { sessionId: id }, annotations: { readOnlyHint: true } }, wrap(async args => object(await (await backend()).rpc('schema', args))));
 server.registerTool('pencil_status', { description: 'Vérifier le document, le canal, la sauvegarde et les agents de cette session Pencil.', inputSchema: { sessionId: id }, annotations: { readOnlyHint: true } }, wrap(async args => object(await (await backend()).rpc('status', args))));
-server.registerTool('pencil_begin', { description: 'Rejoindre la session comme agent. Retourne lease, un jeton de participation NON exclusif : plusieurs agents peuvent travailler simultanément dans le même sessionId. Chaque agent modifie sa propre frame pour éviter les conflits. Une autre session ne peut pas ouvrir le même document.', inputSchema: { sessionId: id, agent: z.string().min(1).max(200) } }, wrap(async args => object(await (await backend()).rpc('acquire', args))));
+server.registerTool('pencil_begin', { description: 'Rejoindre la session comme agent ; attend la connexion du moteur (20 secondes par défaut, PENCIL_EDITOR_WAIT_MS). Retourne lease, un jeton de participation NON exclusif : plusieurs agents peuvent travailler simultanément dans le même sessionId. Chaque agent modifie sa propre frame pour éviter les conflits. Une autre session ne peut pas ouvrir le même document.', inputSchema: { sessionId: id, agent: z.string().min(1).max(200) } }, wrap(async args => object(await (await backend()).rpc('acquire', args))));
 server.registerTool('pencil_call', {
-  description: 'Appeler les outils natifs Pencil via le canal de la session partagée. Commencer par read_skill puis get_app_state. Partager sessionId et utiliser son propre lease de participation. Les appels sont transmis immédiatement sans file globale ; ne pas modifier les nœuds d’un autre agent. Les générations asynchrones ne sont pas supportées dans v0.1 ; un OUTCOME_UNKNOWN interdit de rejouer la mutation.',
+  description: 'Appeler les outils natifs Pencil via le canal de la session partagée. Commencer par read_skill puis get_app_state. read_skill est mutualisé par chemin dans cette génération du moteur. Chaque agent crée sa propre frame dans son premier execute ; aucune frame préparée. Partager sessionId et utiliser son propre lease de participation. Les appels sont transmis immédiatement sans file globale ; ne pas modifier les nœuds d’un autre agent. Les générations asynchrones ne sont pas supportées dans v0.1 ; un OUTCOME_UNKNOWN interdit de rejouer la mutation.',
   inputSchema: { sessionId: id, lease: id, tool: z.enum(['execute', 'get_app_state', 'get_style', 'read_skill']), arguments: z.record(z.string(), z.unknown()).default({}) }
 }, wrap(async args => (await backend()).rpc('call', args)));
 server.registerTool('pencil_end', { description: 'Terminer sa participation après la fin de ses appels, sans interrompre les autres agents. Ne prouve pas la sauvegarde ; vérifier pencil_status et le fichier via le moteur.', inputSchema: { sessionId: id, lease: id } }, wrap(async args => object(await (await backend()).rpc('release', args))));
