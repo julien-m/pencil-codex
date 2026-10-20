@@ -2,7 +2,20 @@
 
 Validation performed on 2026-10-20 with Node.js and the real hosted Pencil engine.
 
-This report covers version 0.4.1. Version 0.5.0 changes the native transport to the MCP Apps host bridge. Its automated transport checks pass, but a real native-panel opening and editing test is still pending; the browser measurements below do not certify that path.
+The startup comparison below covers version 0.4.1. Version 0.5.0 was subsequently tested in the real native Codex panel, as recorded here; the earlier browser measurements do not measure that path.
+
+## Native-panel test — version 0.5.0
+
+On 2026-10-20, after Codex restarted and exposed the installed plugin tools:
+
+- A real `pencil_new` call automatically opened the Pencil MCP App in the side panel. The native MCP Apps surface was observed through its dedicated UI backend; no browser preview was opened.
+- Status recorded `openedAt = 1792510874481` and `readyAt = 1792510880384`: a 5.903-second interval to the hosted engine handshake in this single run. This is an observation, not a performance guarantee.
+- The engine reported an empty document, returned its schemas and instructions, and created a frame through `pencil_call` / `execute`. The native panel's layer list showed the new frame.
+- Clicking **Enregistrer** in that native panel produced the visible confirmation “Modifications enregistrées dans le fichier .pen”. Status reported `source-saved`; an independent disk read found the new frame in the saved document (2260 bytes).
+- A capture of the created component also succeeded through the installed plugin. This is a design-render capture, not a screenshot of the Codex window: the MCP Apps UI backend does not support screenshots containing embedded frames.
+- The transport used the standard host bridge and the app-only `pencil_editor_bridge` tool. The native UI resource declared an empty direct-network `connectDomains` list.
+
+The existing automated suite passed 34 tests and the MCP protocol test, including a run against the installed bundle. This live test validates automatic opening, editing and panel-button saving in the tested host. It does not add a native multi-agent benchmark or establish behavior for every Codex host.
 
 ## Installation and execution
 

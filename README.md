@@ -18,7 +18,9 @@ Read [the plugin manifest](plugin.json) for its identity, [the MCP configuration
 
 ## Status and requirements
 
-**Native-panel validation is pending for version 0.5.0.** The native view now uses the standard MCP Apps host bridge (`app.callServerTool`), rather than opening a loopback WebSocket from its iframe. The Node server relays messages to the existing authenticated local service. This addresses the direct-network dependency observed in earlier versions; passing transport tests does not establish that the native panel opens and works in your Codex host.
+**The native Codex panel was validated with version 0.5.0 on 2026-10-20.** A real `pencil_new` tool call opened the MCP App in the side panel automatically. The hosted engine connected, accepted a newly created frame and saved it through the panel's **Enregistrer** button. The saved source file was read back from disk. No browser preview was used for this test. This verifies the tested host, not every Codex version or configuration.
+
+The native view uses the standard MCP Apps host bridge (`app.callServerTool`). The Node server relays messages to the authenticated local service; the iframe does not open a loopback WebSocket.
 
 The version 0.4.1 installed editor resource was validated in a local browser against the real hosted engine. Three model sub-agents independently created their own frames in one initially empty document; the shared document was saved and captured. Scripted fixtures test transport mechanics and are not independent agents. Automated transport tests separately verify overlapping requests. Read [the installed-validation report](docs/installed-validation.md) for measurements and limitations. Opening the same document under another session scope remains rejected with `DOCUMENT_BUSY`.
 
@@ -41,7 +43,7 @@ codex plugin marketplace add julien-m/pencil-codex
 codex plugin add pencil@pencil
 ```
 
-The installable bundles are included in Git, so installation does not require a compiler or a local `node_modules` directory. If an existing conversation does not expose the installed tools, restart Codex and resume the conversation; no slash reload command is provided by this plugin. Keep the native-panel limitation above in mind.
+The installable bundles are included in Git, so installation does not require a compiler or a local `node_modules` directory. If an existing conversation does not expose the installed tools, restart Codex and resume the conversation; no slash reload command is provided by this plugin. See the tested-host scope above.
 
 ## Development and validation
 
