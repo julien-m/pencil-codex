@@ -40298,7 +40298,7 @@ async function connectBroker(directory = process.env.PLUGIN_DATA ?? path.join(ro
       const response = await fetch(`http://127.0.0.1:${info2.port}/rpc`, { method: "POST", headers: { Authorization: `Bearer ${info2.token}` }, body: JSON.stringify({ method: "ping" }), signal: AbortSignal.timeout(1e3) });
       if (!response.ok) return null;
       const advertised = (await response.json()).result;
-      if (advertised?.version !== "0.5.0" || !Number.isSafeInteger(advertised.rpcTimeoutMs) || advertised.rpcTimeoutMs <= 0 || advertised.rpcTimeoutMs > 2147483647) return null;
+      if (advertised?.version !== "0.5.1" || !Number.isSafeInteger(advertised.rpcTimeoutMs) || advertised.rpcTimeoutMs <= 0 || advertised.rpcTimeoutMs > 2147483647) return null;
       return { ...info2, editorWaitTimeout: advertised.editorWaitTimeout, rpcTimeoutMs: advertised.rpcTimeoutMs };
     } catch {
       return null;
@@ -40354,8 +40354,43 @@ var import_websocket_server = __toESM(require_websocket_server(), 1);
 
 // src/ui-relay.mjs
 import { randomUUID } from "node:crypto";
+
+// shared/bridge-wire.mjs
+var BRIDGE_CHUNK_CHARS = 32768;
+var BRIDGE_BATCH_CHUNKS = 4;
+var BRIDGE_MAX_CHARS = 40 * 1024 * 1024;
+function encodeMessage(message) {
+  const text = JSON.stringify(message);
+  if (text.length > BRIDGE_MAX_CHARS) throw new Error("EDITOR_MESSAGE_TOO_LARGE");
+  const transferId = crypto.randomUUID(), chunks = [];
+  for (let index = 0, start = 0; start < text.length; index++, start += BRIDGE_CHUNK_CHARS)
+    chunks.push({ transferId, index, done: start + BRIDGE_CHUNK_CHARS >= text.length, data: text.slice(start, start + BRIDGE_CHUNK_CHARS) });
+  return chunks;
+}
+var MessageDecoder = class {
+  constructor() {
+    this.current = null;
+  }
+  accept(chunk) {
+    if (!chunk || typeof chunk.transferId !== "string" || !Number.isSafeInteger(chunk.index) || typeof chunk.data !== "string" || typeof chunk.done !== "boolean" || chunk.data.length > BRIDGE_CHUNK_CHARS) throw new Error("INVALID_EDITOR_CHUNK");
+    if (!this.current) {
+      if (chunk.index !== 0) throw new Error("EDITOR_CHUNK_OUT_OF_ORDER");
+      this.current = { id: chunk.transferId, next: 0, parts: [], length: 0 };
+    }
+    const current = this.current;
+    if (chunk.transferId !== current.id || chunk.index !== current.next++) throw new Error("EDITOR_CHUNK_OUT_OF_ORDER");
+    current.parts.push(chunk.data);
+    current.length += chunk.data.length;
+    if (current.length > BRIDGE_MAX_CHARS) throw new Error("EDITOR_MESSAGE_TOO_LARGE");
+    if (!chunk.done) return void 0;
+    this.current = null;
+    return JSON.parse(current.parts.join(""));
+  }
+};
+
+// src/ui-relay.mjs
 var UiRelay = class {
-  constructor({ idleTimeout = 15e3, pollTimeout = 250, maxBytes = 40 * 1024 * 1024 } = {}) {
+  constructor({ idleTimeout = 12e4, pollTimeout = 5e3, maxBytes = 40 * 1024 * 1024 } = {}) {
     this.connections = /* @__PURE__ */ new Map();
     this.idleTimeout = idleTimeout;
     this.pollTimeout = pollTimeout;
@@ -40364,17 +40399,20 @@ var UiRelay = class {
   async connect({ port, sessionId, editorToken }) {
     const socket = new import_websocket.default(`ws://127.0.0.1:${port}/editor?session=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(editorToken)}`, { maxPayload: this.maxBytes, handshakeTimeout: 2e3 });
     const connectionId = randomUUID();
-    const state = { socket, messages: [], bytes: 0, waiting: null, polling: false, closed: false };
+    const state = { sessionId, openedAt: Date.now(), exchanges: 0, pushes: 0, receivedMessages: 0, sentMessages: 0, decoder: new MessageDecoder(), socket, messages: [], bytes: 0, waiting: null, polling: false, closed: false };
     socket.on("error", () => {
     });
     socket.on("message", (bytes) => {
-      if (state.bytes + bytes.length > this.maxBytes) {
-        this.close(connectionId);
-        return;
-      }
       try {
-        state.messages.push(JSON.parse(bytes.toString()));
-        state.bytes += bytes.length;
+        const chunks = encodeMessage(JSON.parse(bytes.toString()));
+        const queuedBytes = chunks.reduce((sum, chunk) => sum + Buffer.byteLength(chunk.data), 0);
+        if (state.bytes + queuedBytes > this.maxBytes) {
+          this.close(connectionId);
+          return;
+        }
+        state.messages.push(...chunks);
+        state.bytes += queuedBytes;
+        state.receivedMessages++;
         state.waiting?.();
       } catch {
         this.close(connectionId);
@@ -40407,12 +40445,10 @@ var UiRelay = class {
     if (!state) throw new Error("EDITOR_CHANNEL_CLOSED");
     if (state.polling) throw new Error("EDITOR_EXCHANGE_IN_FLIGHT");
     state.polling = true;
+    state.exchanges++;
     this.touch(connectionId, state);
     try {
-      for (const message of messages) {
-        if (state.socket.readyState !== import_websocket.default.OPEN) throw new Error("EDITOR_CHANNEL_CLOSED");
-        state.socket.send(JSON.stringify(message));
-      }
+      this.send(connectionId, messages);
       if (!state.messages.length && !state.closed) await new Promise((resolve) => {
         const timer = setTimeout(resolve, this.pollTimeout);
         state.waiting = () => {
@@ -40421,13 +40457,35 @@ var UiRelay = class {
         };
       });
       if (state.closed) throw new Error("EDITOR_CHANNEL_CLOSED");
-      const incoming = state.messages.splice(0);
-      state.bytes = 0;
+      const incoming = state.messages.splice(0, BRIDGE_BATCH_CHUNKS);
+      state.bytes -= incoming.reduce((sum, chunk) => sum + Buffer.byteLength(chunk.data), 0);
       return { messages: incoming };
     } finally {
       state.waiting = null;
       state.polling = false;
     }
+  }
+  send(connectionId, chunks = []) {
+    const state = this.connections.get(connectionId);
+    if (!state || state.socket.readyState !== import_websocket.default.OPEN) throw new Error("EDITOR_CHANNEL_CLOSED");
+    this.touch(connectionId, state);
+    if (chunks.length) state.pushes++;
+    try {
+      for (const chunk of chunks) {
+        const message = state.decoder.accept(chunk);
+        if (message !== void 0) {
+          state.socket.send(JSON.stringify(message));
+          state.sentMessages++;
+        }
+      }
+    } catch (error62) {
+      this.close(connectionId);
+      throw error62;
+    }
+    return { accepted: chunks.length };
+  }
+  status(sessionId) {
+    return [...this.connections.values()].filter((s) => s.sessionId === sessionId).map((s) => ({ connected: !s.closed, openedAt: s.openedAt, exchanges: s.exchanges, pushes: s.pushes, receivedMessages: s.receivedMessages, sentMessages: s.sentMessages, queuedChunks: s.messages.length, idleTimeoutMs: this.idleTimeout, pollTimeoutMs: this.pollTimeout }));
   }
   close(connectionId) {
     const state = this.connections.get(connectionId);
@@ -40444,8 +40502,8 @@ var UiRelay = class {
 };
 
 // src/server.mjs
-var server = new McpServer({ name: "pencil-panel", version: "0.5.0" });
-var resource = "ui://pencil-panel/editor-v2.html";
+var server = new McpServer({ name: "pencil-panel", version: "0.5.1" });
+var resource = "ui://pencil-panel/editor-v3.html";
 var uiRelay = new UiRelay();
 var defaultScope = process.env.CODEX_THREAD_ID ?? `client-${randomUUID2()}`;
 var broker;
@@ -40468,7 +40526,7 @@ server.registerResource("pencil-editor", resource, {}, async () => {
 });
 server.registerTool("pencil_editor_bridge", {
   description: "Internal editor transport for the Pencil MCP App.",
-  inputSchema: { action: external_exports.enum(["connect", "exchange", "close"]), sessionId: external_exports.string().uuid().optional(), editorToken: external_exports.string().uuid().optional(), connectionId: external_exports.string().uuid().optional(), messages: external_exports.array(external_exports.record(external_exports.string(), external_exports.unknown())).optional() },
+  inputSchema: { action: external_exports.enum(["connect", "exchange", "send", "close"]), sessionId: external_exports.string().uuid().optional(), editorToken: external_exports.string().uuid().optional(), connectionId: external_exports.string().uuid().optional(), messages: external_exports.array(external_exports.record(external_exports.string(), external_exports.unknown())).max(BRIDGE_BATCH_CHUNKS).optional() },
   _meta: { ui: { visibility: ["app"] } }
 }, wrap(async (args) => {
   if (args.action === "connect") {
@@ -40477,6 +40535,7 @@ server.registerTool("pencil_editor_bridge", {
     return object3(await uiRelay.connect({ port: b.port, sessionId: args.sessionId, editorToken: args.editorToken }));
   }
   if (!args.connectionId) throw new Error("Editor connection required");
+  if (args.action === "send") return object3(uiRelay.send(args.connectionId, args.messages));
   if (args.action === "close") {
     uiRelay.close(args.connectionId);
     return object3({ closed: true });
@@ -40498,7 +40557,7 @@ server.registerTool("pencil_capture", { description: 'Capturer des composants ou
 server.registerTool("pencil_export", { description: "Exporter les n\u0153uds s\xE9lectionn\xE9s vers PNG/JPEG/WEBP/PDF/HTML dans le dossier absolu choisi. Le r\xE9sultat contient les fichiers r\xE9ellement \xE9crits. Participation \xE0 la session requise ; aucun \xE9crasement.", inputSchema: { ...selection, format: external_exports.enum(["png", "jpeg", "webp", "pdf", "html-css", "html-tailwind"]) } }, wrap(async (args) => (await backend()).rpc("export", args)));
 server.registerTool("pencil_save_as", { description: "Enregistrer le dernier snapshot acquitt\xE9 dans un NOUVEAU fichier .pen au chemin choisi. Utiliser un snapshot acquitt\xE9 (draft-saved, source-saved ou conflict) dans pencil_status ; aucun \xE9crasement ni basculement implicite de document.", inputSchema: { sessionId: id, lease: id, path: external_exports.string() } }, wrap(async (args) => object3(await (await backend()).rpc("save-as", args))));
 server.registerTool("pencil_tools", { description: "D\xE9couvrir les sch\xE9mas natifs publi\xE9s par le moteur de cette session ; respecter ces sch\xE9mas avant pencil_call.", inputSchema: { sessionId: id }, annotations: { readOnlyHint: true } }, wrap(async (args) => object3(await (await backend()).rpc("schema", args))));
-server.registerTool("pencil_status", { description: "V\xE9rifier le document, le canal, la sauvegarde et les agents de cette session Pencil.", inputSchema: { sessionId: id }, annotations: { readOnlyHint: true } }, wrap(async (args) => object3(await (await backend()).rpc("status", args))));
+server.registerTool("pencil_status", { description: "V\xE9rifier le document, le canal, la sauvegarde et les agents de cette session Pencil.", inputSchema: { sessionId: id }, annotations: { readOnlyHint: true } }, wrap(async (args) => object3({ ...await (await backend()).rpc("status", args), bridge: uiRelay.status(args.sessionId) })));
 server.registerTool("pencil_begin", { description: "Rejoindre imm\xE9diatement la session comme agent, m\xEAme si le moteur est hors ligne. pencil_call attendra le moteur dans le d\xE9lai annonc\xE9 par le service. Retourne lease, un jeton de participation NON exclusif : plusieurs agents peuvent travailler simultan\xE9ment dans le m\xEAme sessionId. Chaque agent modifie sa propre frame pour \xE9viter les conflits. Une autre session ne peut pas ouvrir le m\xEAme document.", inputSchema: { sessionId: id, agent: external_exports.string().min(1).max(200) } }, wrap(async (args) => object3(await (await backend()).rpc("acquire", args))));
 server.registerTool("pencil_call", {
   description: "Appeler les outils natifs Pencil via le canal de la session partag\xE9e. Commencer par read_skill puis get_app_state. read_skill est mutualis\xE9 par chemin dans cette g\xE9n\xE9ration du moteur. Chaque agent cr\xE9e sa propre frame dans son premier execute ; aucune frame pr\xE9par\xE9e. Partager sessionId et utiliser son propre lease de participation. Les appels sont transmis imm\xE9diatement sans file globale ; ne pas modifier les n\u0153uds d\u2019un autre agent. Les g\xE9n\xE9rations asynchrones ne sont pas support\xE9es dans v0.1 ; un OUTCOME_UNKNOWN interdit de rejouer la mutation.",

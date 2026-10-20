@@ -34,7 +34,9 @@ Requirements:
 
 The plugin does not redistribute the proprietary Pencil engine and does not work offline.
 
-The native view declares no direct connection domains. Its internal `pencil_editor_bridge` tool is visible only to the app and uses a private, expiring connection capability after authenticating the session grant. A bridge failure stops the channel without replaying messages or falling back to a browser. The standalone development preview retains its direct WebSocket transport.
+The native view declares no direct connection domains. Its internal `pencil_editor_bridge` tool is visible only to the app and uses a private connection capability with a two-minute inactivity expiry after authenticating the session grant. A bridge failure stops the channel without replaying messages or falling back to a browser. The standalone development preview retains its direct WebSocket transport.
+
+The native bridge waits up to five seconds per quiet receive poll (about 0.2 polls/second, before host overhead). Sending runs independently, so a quiet poll does not hold engine responses or Save requests. Messages are split into ordered chunks of at most 32768 JavaScript string characters, with at most four chunks per tool exchange; chunks are reassembled before dispatch. Missing or reordered chunks close the channel rather than replaying a mutation. `pencil_status.bridge` exposes per-view exchange/push counts and timestamps for measurement. Hidden views can retain an idle connection for two minutes; an actual host teardown still closes it. This is not a guarantee that every host keeps hidden JavaScript running.
 
 ## Installation
 
@@ -80,6 +82,8 @@ The build generates `dist/server.mjs`, `dist/daemon.mjs`, `dist/editor.html` and
 3. Each agent calls `pencil_begin` to join, uses its own returned `lease` with `pencil_call`, then leaves with `pencil_end`. The legacy field name `lease` now identifies a non-exclusive participation token. Agents can join and send requests at the same time; one agent leaving does not end the others’ participation.
 4. Give every agent collaborating on that document the same returned `sessionId`. Do not open the same file under another `scope` to create a second writer.
 
+Engine JavaScript globals are shared by all agents in one session. Prefix persistent variables and helpers with each agent's identifier, such as `agent3_screen`, to avoid collisions. For outlines use `stroke: {type: 'color', color: '#RRGGBB'}` and a separate `strokeWidth`; do not use `align` or `thickness` inside `stroke`.
+
 New documents start empty. Each agent creates its own frame in its first `execute`, using an orchestrator-assigned position or `FindEmptySpace`. Screen count, names, dimensions, colors and content come from the task, never a prepared scenario. Read [the plugin skill](skills/pencil/SKILL.md) before coordinating agents.
 
 Implicit scopes use `CODEX_THREAD_ID` when available, otherwise the MCP process identity. This is not a guaranteed native conversation identifier: agents must explicitly share the returned `sessionId`. The `agent` field is an activity label, not an authenticated identity.
@@ -88,11 +92,11 @@ The plugin opens documents only through `pencil_open` or `pencil_new`. It does n
 
 ## Startup and session metadata
 
-`PENCIL_EDITOR_WAIT_MS` sets the maximum editor readiness wait in milliseconds (default 20000). Joining with `pencil_begin` requires no view and responds immediately. Only engine-dependent calls wait during loading. The local service advertises its effective wait and RPC deadline; MCP clients use those advertised values even when their environment differs. Expiration returns `EDITOR_OFFLINE` without sending a mutation. The readiness signal is the hosted engine bridge handshake, rather than just an open WebSocket.
+`PENCIL_EDITOR_WAIT_MS` sets the maximum editor readiness wait in milliseconds (default 60000). Joining with `pencil_begin` requires no view and responds immediately. Only engine-dependent calls wait during loading. The local service advertises its effective wait and RPC deadline; MCP clients use those advertised values even when their environment differs. Expiration returns `EDITOR_OFFLINE` without sending a mutation. The readiness signal is the hosted engine bridge handshake, rather than just an open WebSocket.
 
 Concurrent `read_skill` requests for the same path share one channel round trip, then receive independent copies of the cached response. Tool schemas use the same session cache. A reconnect creates a new engine generation and invalidates both caches. Errors are not cached. This removes repeated metadata requests; it does not shorten loading of the hosted Pencil engine or language-model preparation.
 
-`pencil_status` exposes `openedAt`, `readyAt`, generation-local metadata counters and bounded `recentCalls` with request, dispatch and completion timestamps. Cache hits have no channel dispatch timestamp. Measure the installed `dist/` server from a clean clone without development dependencies; demonstration data belongs only in examples and test fixtures.
+`pencil_status` exposes `openedAt`, `readyAt`, generation-local metadata counters and bounded `recentCalls` with request, dispatch and completion timestamps. Every skill read, including a warm-cache read, has its own history entry. Cache hits have a request timestamp and `cacheHit`, with no channel dispatch timestamp. Per-agent and total `activeCalls` count operations actually sent to the engine; `waitingCalls` count those held for readiness, Save or a shared metadata response. The header distinguishes waiting for the engine from execution and Save waits. Measure the installed `dist/` server from a clean clone without development dependencies; demonstration data belongs only in examples and test fixtures.
 
 ## Save, captures and exports
 

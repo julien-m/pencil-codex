@@ -12,7 +12,7 @@ export async function connectBroker(directory = process.env.PLUGIN_DATA ?? path.
       const response = await fetch(`http://127.0.0.1:${info.port}/rpc`, { method: 'POST', headers: { Authorization: `Bearer ${info.token}` }, body: JSON.stringify({ method: 'ping' }), signal: AbortSignal.timeout(1000) });
       if (!response.ok) return null;
       const advertised = (await response.json()).result;
-      if (advertised?.version !== '0.5.0' || !Number.isSafeInteger(advertised.rpcTimeoutMs) || advertised.rpcTimeoutMs <= 0 || advertised.rpcTimeoutMs > 2147483647) return null;
+      if (advertised?.version !== '0.5.1' || !Number.isSafeInteger(advertised.rpcTimeoutMs) || advertised.rpcTimeoutMs <= 0 || advertised.rpcTimeoutMs > 2147483647) return null;
       return { ...info, editorWaitTimeout: advertised.editorWaitTimeout, rpcTimeoutMs: advertised.rpcTimeoutMs };
     } catch { return null; }
   };

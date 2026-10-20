@@ -33,7 +33,8 @@ export class Sessions {
   }
   status(id) {
     const s = this.get(id);
-    return { sessionId: s.id, scope: s.scope, name: path.basename(s.file), connected: s.connected, editorReady: s.editorReady, metadataStats: { ...s.metadataStats }, openedAt: s.openedAt, readyAt: s.readyAt ?? null, recentCalls: s.recentCalls.map(c => ({ ...c })), generation: s.generation, blocked: s.blocked, leaseOwner: [...s.agents.values()].map(a => a.agent).join(', ') || null, agents: [...s.agents.values()].map(a => ({ agent: a.agent, activeCalls: a.calls })), activeCalls: [...s.agents.values()].reduce((n, a) => n + a.calls, 0), saving: !!s.saving, operations: s.operations, saveState: s.saveState, draftPath: s.draft };
+    const agents = [...s.agents.values()].map(a => ({ agent: a.agent, activeCalls: [...a.pending].filter(c => c.dispatchedAt).length, waitingCalls: [...a.pending].filter(c => !c.dispatchedAt).length, waitingFor: [...new Set([...a.pending].filter(c => !c.dispatchedAt).map(c => c.waitingFor))] }));
+    return { sessionId: s.id, scope: s.scope, name: path.basename(s.file), connected: s.connected, editorReady: s.editorReady, metadataStats: { ...s.metadataStats }, openedAt: s.openedAt, readyAt: s.readyAt ?? null, recentCalls: s.recentCalls.map(c => ({ ...c })), generation: s.generation, blocked: s.blocked, leaseOwner: [...s.agents.values()].map(a => a.agent).join(', ') || null, agents, activeCalls: agents.reduce((n, a) => n + a.activeCalls, 0), waitingCalls: agents.reduce((n, a) => n + a.waitingCalls, 0), saving: !!s.saving, operations: s.operations, saveState: s.saveState, draftPath: s.draft };
   }
   attach(id, send, { ready = true } = {}) {
     const s = this.get(id);
@@ -69,7 +70,7 @@ export class Sessions {
         else if (s.connected && s.editorReady) { cleanup(); resolve(); }
       };
       const cleanup = () => { clearTimeout(timer); s.connectionWaiters.delete(finish); };
-      const timer = setTimeout(() => { cleanup(); reject(new SessionError('EDITOR_OFFLINE', 'Éditeur non connecté dans le délai configuré')); }, Math.max(0, deadline - Date.now()));
+      const timer = setTimeout(() => { cleanup(); reject(new SessionError('EDITOR_OFFLINE', 'Ouvrir ou afficher la vue Pencil, puis rappeler cet outil ; aucun appel n’a été envoyé au moteur')); }, Math.max(0, deadline - Date.now()));
       s.connectionWaiters.add(finish);
     });
   }
@@ -78,7 +79,7 @@ export class Sessions {
     await this.waitForEditor(id, deadline);
     const s = this.get(id), cache = s.metadataCache;
     if (s.saving) return this.afterSave(id, () => this.metadata(id, key, operation, record, deadline));
-    if (cache.has(key)) { s.metadataStats.hits += 1; if (record) record.cacheHit = true; }
+    if (cache.has(key)) { s.metadataStats.hits += 1; if (record) { record.cacheHit = true; record.waitingFor = 'metadata'; } }
     else {
       s.metadataStats.requests += 1;
       const pending = Promise.resolve().then(operation).then(result => {
@@ -95,13 +96,13 @@ export class Sessions {
     if (s.blocked) fail('OUTCOME_UNKNOWN', 'Session bloquée après un résultat inconnu');
     // The legacy lease field is now a non-exclusive participation token.
     const token = randomUUID();
-    s.agents.set(token, { agent, calls: 0 });
+    s.agents.set(token, { agent, pending: new Set() });
     return { lease: token, ...this.status(id) };
   }
   release(id, token) {
     const s = this.get(id), participant = s.agents.get(token);
     if (!participant) fail('INVALID_LEASE', 'Participation invalide');
-    if (participant.calls || s.saving) fail('CALLS_IN_FLIGHT', 'Des appels restent en cours');
+    if (participant.pending.size || s.saving) fail('CALLS_IN_FLIGHT', 'Des appels restent en cours');
     if (s.blocked) fail('OUTCOME_UNKNOWN', 'Ne pas terminer une participation avec une opération inconnue');
     s.agents.delete(token);
     return this.status(id);
@@ -110,37 +111,30 @@ export class Sessions {
     const s = this.get(id), participant = s.agents.get(token);
     if (!participant) fail('INVALID_LEASE', 'Participation requise avant les appels');
     if (s.blocked) fail('OUTCOME_UNKNOWN', 'Session bloquée ; ne pas rejouer les mutations');
-    if (s.saving) {
-      participant.calls += 1; this.onActivity?.(id);
-      let resumed = false;
-      return this.afterSave(id, () => {
-        participant.calls -= 1; resumed = true;
-        return this.call(id, token, name, args, { observational });
-      }).finally(() => { if (!resumed) participant.calls -= 1; this.onActivity?.(id); });
-    }
     if (!['execute', 'read_skill', 'get_style', 'get_app_state'].includes(name)) fail('TOOL_NOT_ALLOWED', 'Outil non exposé par ce plugin');
     if (name === 'execute' && /\bGenerate\s*\(/.test(args.input ?? '')) fail('ASYNC_UNSUPPORTED', 'La génération asynchrone n’est pas prise en charge dans cette version');
-    participant.calls += 1;
     const mutation = name === 'execute' && !observational;
     // Dispatch immediately: each request has its own response ID, no document queue.
     let result;
-    const record = { agent: participant.agent, tool: name, requestedAt: Date.now(), editorDeadline: Date.now() + this.editorWaitTimeout, generation: s.generation };
+    const record = { agent: participant.agent, tool: name, requestedAt: Date.now(), editorDeadline: Date.now() + this.editorWaitTimeout, generation: s.generation, waitingFor: s.saving ? 'save' : !s.editorReady ? 'engine' : 'metadata' };
+    participant.pending.add(record);
     s.recentCalls.push(record); if (s.recentCalls.length > 100) s.recentCalls.shift();
     const dispatch = () => {
       return this.request(id, 'mcp-tool-call', { name, arguments: args }, record);
     };
     try {
-      result = name === 'read_skill'
+      const run = () => name === 'read_skill'
         ? this.metadata(id, `read_skill:${args.path ?? ''}`, dispatch, record)
         : !s.editorReady ? this.waitForEditor(id, record.editorDeadline).then(dispatch) : dispatch();
+      result = s.saving ? this.afterSave(id, run) : run();
     }
-    catch (error) { participant.calls -= 1; throw error; }
+    catch (error) { participant.pending.delete(record); record.error = error.code ?? 'ERROR'; record.finishedAt = Date.now(); this.onActivity?.(id); throw error; }
     this.onActivity?.(id);
     return result.then(response => {
       s.operations += 1; record.completedAt = Date.now(); record.isError = !!response?.isError;
       return response;
     }).catch(error => { record.error = error.code ?? 'ERROR'; throw error; }).finally(() => {
-      participant.calls -= 1; record.finishedAt = Date.now();
+      participant.pending.delete(record); record.finishedAt = Date.now();
       if (mutation && record.dispatchedAt) {
         s.mutationRevision += 1;
         if (s.saveState !== 'conflict') s.saveState = 'check-required';
@@ -164,10 +158,10 @@ export class Sessions {
   }
   request(id, method, payload, record, deadline = record?.editorDeadline ?? Date.now() + this.editorWaitTimeout) {
     const s = this.get(id);
-    if (s.saving && method !== 'save') return this.afterSave(id, () => this.request(id, method, payload, record, deadline));
+    if (s.saving && method !== 'save') { if (record) record.waitingFor = 'save'; return this.afterSave(id, () => this.request(id, method, payload, record, deadline)); }
     if (s.blocked) fail('OUTCOME_UNKNOWN', 'Session bloquée ; ne pas rejouer les mutations');
-    if (!s.connected || !s.editorReady) return this.waitForEditor(id, deadline).then(() => this.request(id, method, payload, record, deadline));
-    if (record) { record.dispatchedAt = Date.now(); record.generation = s.generation; }
+    if (!s.connected || !s.editorReady) { if (record) record.waitingFor = 'engine'; return this.waitForEditor(id, deadline).then(() => this.request(id, method, payload, record, deadline)); }
+    if (record) { record.dispatchedAt = Date.now(); record.generation = s.generation; delete record.waitingFor; this.onActivity?.(id); }
     const requestId = randomUUID();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -218,7 +212,7 @@ export class Sessions {
   async save(id, token) {
     const s = this.get(id);
     if (s.saving) return this.afterSave(id, () => this.save(id, token));
-    if (!s.agents.has(token) || s.pending.size || [...s.agents.values()].some(a => a.calls) || s.blocked || s.saving) fail('SAVE_NOT_READY', 'Rejoindre la session et attendre la fin des opérations');
+    if (!s.agents.has(token) || s.pending.size || [...s.agents.values()].some(a => a.pending.size) || s.blocked || s.saving) fail('SAVE_NOT_READY', 'Rejoindre la session et attendre la fin des opérations');
     let finishSave, saveError;
     s.saveFinished = new Promise(resolve => { finishSave = resolve; });
     s.saving = true; this.onActivity?.(id);
@@ -248,7 +242,7 @@ export class Sessions {
   async saveAs(id, token, filename) {
     const s = this.get(id);
     if (s.saving) return this.afterSave(id, () => this.saveAs(id, token, filename));
-    if (!s.agents.has(token) || s.pending.size || [...s.agents.values()].some(a => a.calls) || s.blocked || s.saving) fail('SAVE_NOT_READY', 'Rejoindre la session et attendre la fin des opérations');
+    if (!s.agents.has(token) || s.pending.size || [...s.agents.values()].some(a => a.pending.size) || s.blocked || s.saving) fail('SAVE_NOT_READY', 'Rejoindre la session et attendre la fin des opérations');
     if (!['draft-saved', 'source-saved', 'conflict'].includes(s.saveState)) fail('SAVE_NOT_READY', 'Attendre un acquittement de sauvegarde du moteur avant Enregistrer sous');
     if (path.extname(filename).toLowerCase() !== '.pen') fail('INVALID_PATH', 'Choisir un nouveau fichier .pen');
     const saved = await writeNewFile(filename, await fs.readFile(s.draft));

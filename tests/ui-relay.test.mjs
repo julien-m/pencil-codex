@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { startBroker } from '../src/broker.mjs';
 import { UiRelay } from '../src/ui-relay.mjs';
+import { WebSocketServer } from 'ws';
 import { createMcpTransport } from '../web/mcp-transport.mjs';
 
 test('native MCP transport routes concurrent agents, storage and Save through the existing broker', async () => {
@@ -24,6 +25,7 @@ test('native MCP transport routes concurrent agents, storage and Save through th
       let result;
       if (args.action === 'connect') result = await relay.connect({ port: broker.port, ...args });
       else if (args.action === 'exchange') result = await relay.exchange(args.connectionId, args.messages);
+      else if (args.action === 'send') result = relay.send(args.connectionId, args.messages);
       else { relay.close(args.connectionId); result = { closed: true }; }
       return { structuredContent: result };
     } };
@@ -102,4 +104,20 @@ test('host bridge errors stop the web transport without replaying messages', asy
   await failed; await transport.close();
   assert.equal(calls.filter(action => action === 'exchange').length, 1);
   assert.equal(transport.readyState, 3);
+});
+
+test('draining chunks releases queue capacity before the next message arrives', async () => {
+  const server=new WebSocketServer({port:0,host:'127.0.0.1'});await new Promise(resolve=>server.once('listening',resolve));
+  let peer;const attached=new Promise(resolve=>server.once('connection',p=>{peer=p;resolve()}));
+  const relay=new UiRelay({maxBytes:220000,pollTimeout:5});
+  try {
+    const{connectionId}=await relay.connect({port:server.address().port,sessionId:'queue',editorToken:'grant'});await attached;
+    peer.send(JSON.stringify({payload:'a'.repeat(200000)}));
+    const first=await relay.exchange(connectionId);assert.equal(first.messages.length,4);
+    peer.send(JSON.stringify({payload:'b'.repeat(100000)}));
+    await new Promise(resolve=>setTimeout(resolve,5));
+    assert.equal(relay.status('queue')[0].connected,true);
+    assert(relay.connections.get(connectionId).bytes<220000);
+    const rest=await relay.exchange(connectionId);assert(rest.messages.length>0);
+  } finally {relay.closeAll();await new Promise(resolve=>server.close(resolve));}
 });

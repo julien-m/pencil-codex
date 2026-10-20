@@ -1,5 +1,7 @@
 # Installed startup validation
 
+Version 0.5.1 validation is in progress. The earlier native-panel result below covers 0.5.0; it does not yet establish the new chunked transport, multi-megabyte transfer or hidden-panel behavior.
+
 Validation performed on 2026-10-20 with Node.js and the real hosted Pencil engine.
 
 The startup comparison below covers version 0.4.1. Version 0.5.0 was subsequently tested in the real native Codex panel, as recorded here; the earlier browser measurements do not measure that path.

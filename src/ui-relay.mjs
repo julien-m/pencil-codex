@@ -1,22 +1,25 @@
 import { WebSocket } from 'ws';
 import { randomUUID } from 'node:crypto';
+import { encodeMessage, MessageDecoder, BRIDGE_BATCH_CHUNKS } from '../shared/bridge-wire.mjs';
 
 // The app talks to its originating MCP server, not to a loopback URL.
 // Only this Node-side transport opens the existing authenticated editor socket.
 export class UiRelay {
-  constructor({ idleTimeout = 15000, pollTimeout = 250, maxBytes = 40 * 1024 * 1024 } = {}) {
+  constructor({ idleTimeout = 120000, pollTimeout = 5000, maxBytes = 40 * 1024 * 1024 } = {}) {
     this.connections = new Map();
     this.idleTimeout = idleTimeout; this.pollTimeout = pollTimeout; this.maxBytes = maxBytes;
   }
   async connect({ port, sessionId, editorToken }) {
     const socket = new WebSocket(`ws://127.0.0.1:${port}/editor?session=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(editorToken)}`, { maxPayload: this.maxBytes, handshakeTimeout: 2000 });
     const connectionId = randomUUID();
-    const state = { socket, messages: [], bytes: 0, waiting: null, polling: false, closed: false };
+    const state = { sessionId, openedAt: Date.now(), exchanges: 0, pushes: 0, receivedMessages: 0, sentMessages: 0, decoder: new MessageDecoder(), socket, messages: [], bytes: 0, waiting: null, polling: false, closed: false };
     socket.on('error', () => {});
     socket.on('message', bytes => {
-      if (state.bytes + bytes.length > this.maxBytes) { this.close(connectionId); return; }
       try {
-        state.messages.push(JSON.parse(bytes.toString())); state.bytes += bytes.length;
+        const chunks = encodeMessage(JSON.parse(bytes.toString()));
+        const queuedBytes = chunks.reduce((sum, chunk) => sum + Buffer.byteLength(chunk.data), 0);
+        if (state.bytes + queuedBytes > this.maxBytes) { this.close(connectionId); return; }
+        state.messages.push(...chunks); state.bytes += queuedBytes; state.receivedMessages++;
         state.waiting?.();
       } catch { this.close(connectionId); }
     });
@@ -39,20 +42,34 @@ export class UiRelay {
     const state = this.connections.get(connectionId);
     if (!state) throw new Error('EDITOR_CHANNEL_CLOSED');
     if (state.polling) throw new Error('EDITOR_EXCHANGE_IN_FLIGHT');
-    state.polling = true; this.touch(connectionId, state);
+    state.polling = true; state.exchanges++; this.touch(connectionId, state);
     try {
-      for (const message of messages) {
-        if (state.socket.readyState !== WebSocket.OPEN) throw new Error('EDITOR_CHANNEL_CLOSED');
-        state.socket.send(JSON.stringify(message));
-      }
+      this.send(connectionId, messages);
       if (!state.messages.length && !state.closed) await new Promise(resolve => {
         const timer = setTimeout(resolve, this.pollTimeout);
         state.waiting = () => { clearTimeout(timer); resolve(); };
       });
       if (state.closed) throw new Error('EDITOR_CHANNEL_CLOSED');
-      const incoming = state.messages.splice(0); state.bytes = 0;
+      const incoming = state.messages.splice(0, BRIDGE_BATCH_CHUNKS);
+      state.bytes -= incoming.reduce((sum, chunk) => sum + Buffer.byteLength(chunk.data), 0);
       return { messages: incoming };
     } finally { state.waiting = null; state.polling = false; }
+  }
+  send(connectionId, chunks = []) {
+    const state = this.connections.get(connectionId);
+    if (!state || state.socket.readyState !== WebSocket.OPEN) throw new Error('EDITOR_CHANNEL_CLOSED');
+    this.touch(connectionId, state);
+    if (chunks.length) state.pushes++;
+    try {
+      for (const chunk of chunks) {
+        const message = state.decoder.accept(chunk);
+        if (message !== undefined) { state.socket.send(JSON.stringify(message)); state.sentMessages++; }
+      }
+    } catch (error) { this.close(connectionId); throw error; }
+    return { accepted: chunks.length };
+  }
+  status(sessionId) {
+    return [...this.connections.values()].filter(s => s.sessionId === sessionId).map(s => ({ connected: !s.closed, openedAt: s.openedAt, exchanges: s.exchanges, pushes: s.pushes, receivedMessages: s.receivedMessages, sentMessages: s.sentMessages, queuedChunks: s.messages.length, idleTimeoutMs: this.idleTimeout, pollTimeoutMs: this.pollTimeout }));
   }
   close(connectionId) {
     const state = this.connections.get(connectionId);

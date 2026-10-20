@@ -82,6 +82,8 @@ describe('session routing and reservations', () => {
     const save=r.save(id,a.lease);
     const first=r.call(id,a.lease,'get_app_state'),second=r.call(id,b.lease,'get_app_state');const schema=r.request(id,'get-mcp-schema');
     expect(messages).toHaveLength(1);expect(messages[0].method).toBe('save');
+    expect(r.status(id).activeCalls).toBe(0);expect(r.status(id).waitingCalls).toBe(2);
+    expect(r.status(id).agents.every(a=>a.waitingCalls===1 && a.waitingFor.includes('save'))).toBe(true);
     expect(()=>r.release(id,b.lease)).toThrow('cours');
     r.reply(id,generation,{id:messages[0].id,payload:1});await save;
     await new Promise(resolve=>setTimeout(resolve,0));expect(messages).toHaveLength(4);

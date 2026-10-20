@@ -1,4 +1,5 @@
 import { WebSocket } from 'ws';
+import { encodeMessage, MessageDecoder } from '../shared/bridge-wire.mjs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { strict as assert } from 'node:assert';
@@ -16,12 +17,12 @@ try {
   const bridge = tools.find(x => x.name === 'pencil_editor_bridge');
   assert(bridge, 'The native panel needs an app-only MCP transport');
   assert.deepEqual(bridge._meta.ui.visibility, ['app']);
-  assert.equal(opener._meta.ui.resourceUri, 'ui://pencil-panel/editor-v2.html');
+  assert.equal(opener._meta.ui.resourceUri, 'ui://pencil-panel/editor-v3.html');
   assert(!opener._meta['openai/ui']?.entrypoints);
   assert(opener.inputSchema.required.includes('path'));
   assert(!tools.some(x => x.name === 'pencil_attach_file'));
   assert(tools.some(x => x.name === 'pencil_save'));
-  const ui = await client.readResource({ uri: 'ui://pencil-panel/editor-v2.html' });
+  const ui = await client.readResource({ uri: 'ui://pencil-panel/editor-v3.html' });
   assert(ui.contents[0].text.includes('Éditeur Pencil'));
   assert(ui.contents[0].text.includes('id="save"'));
   assert.deepEqual(ui.contents[0]._meta.ui.csp.frameDomains, ['https://app.pen.dev']);
@@ -45,9 +46,14 @@ try {
   peer.terminate();
   const native = await client.callTool({name:'pencil_new',arguments:{path:path.join(dir,'native.pen'),scope:'native'}});
   const editor=native._meta.editor;
+  const nativeDecoder = new MessageDecoder();
   const bridgeCall=async arguments_=>{
+    if(arguments_.messages) arguments_.messages=arguments_.messages.flatMap(encodeMessage);
     const response=await client.callTool({name:'pencil_editor_bridge',arguments:arguments_});
-    assert(!response.isError,JSON.stringify(response));return response.structuredContent;
+    assert(!response.isError,JSON.stringify(response));
+    const value=response.structuredContent;
+    if(value.messages)value.messages=value.messages.map(c=>nativeDecoder.accept(c)).filter(c=>c!==undefined);
+    return value;
   };
   const {connectionId}=await bridgeCall({action:'connect',sessionId:editor.sessionId,editorToken:editor.editorToken});
   const initial=await bridgeCall({action:'exchange',connectionId});

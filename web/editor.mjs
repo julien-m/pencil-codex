@@ -30,8 +30,8 @@ function start(editor) {
     const m = JSON.parse(event.data);
     if (m.kind === 'activity') {
       const agents = m.status.agents ?? [];
-      document.querySelector('#activity').textContent = agents.length ? agents.map(a => `● ${a.agent}${a.activeCalls ? ' · en cours' : ' · prêt'}`).join('   |   ') : 'Session partagée · aucun agent connecté';
-      saveButton.disabled = !connected || m.status.activeCalls > 0 || m.status.saving || m.status.blocked;
+      document.querySelector('#activity').textContent = agents.length ? agents.map(a => `● ${a.agent}${a.activeCalls ? ' · en cours' : a.waitingCalls ? (a.waitingFor?.includes('save') ? ' · en attente de sauvegarde' : ' · en attente du moteur') : ' · prêt'}`).join('   |   ') : 'Session partagée · aucun agent connecté';
+      saveButton.disabled = !connected || (m.status.activeCalls + (m.status.waitingCalls ?? 0)) > 0 || m.status.saving || m.status.blocked;
       return;
     }
     if (m.kind === 'save-result') {
@@ -71,7 +71,7 @@ frame.src = 'https://app.pen.dev/new?embed';
 window.pencilPanelState = 'loading';
 if (window.pencilPanelPreview) start(window.pencilPanelPreview);
 else {
-  app = new App({ name: 'Pencil', version: '0.5.0' }, { availableDisplayModes: ['fullscreen'] });
+  app = new App({ name: 'Pencil', version: '0.5.1' }, { availableDisplayModes: ['fullscreen'] });
   app.ontoolresult = result => { if (result._meta?.editor) start(result._meta.editor); };
   app.onteardown = async () => { await socket?.close(); return {}; };
   app.connect().catch(e => show(`Hôte MCP Apps : ${e.message}`));

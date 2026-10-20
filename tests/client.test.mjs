@@ -14,5 +14,6 @@ test('client uses the service-advertised deadline rather than its own environmen
   const client=await connectBroker(directory),announcement=await client.rpc('ping');
   assert.equal(client.editorWaitTimeout,announcement.editorWaitTimeout);assert.equal(client.editorWaitTimeout,123);
   assert.equal(client.rpcTimeoutMs,announcement.rpcTimeoutMs);assert(client.rpcTimeoutMs>client.editorWaitTimeout);
+  assert.equal(client.rpcTimeoutMs,123+broker.sessions.timeout+broker.sessions.saveWaitTimeout+2000);
  }finally{if(old===undefined)delete process.env.PENCIL_EDITOR_WAIT_MS;else process.env.PENCIL_EDITOR_WAIT_MS=old;await broker.close();await fs.rm(directory,{recursive:true,force:true})}
 });

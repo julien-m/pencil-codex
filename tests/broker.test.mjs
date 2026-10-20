@@ -63,7 +63,7 @@ test('the editor Save button flushes over WebSocket and publishes the opened fil
     assert.equal(await fs.readFile(result.result.backupPath, 'utf8'), 'before');
     assert.deepEqual((await schemaResult).result,{tools:[]});
     assert.equal(sawSchema,true);
-    assert.deepEqual(b.sessions.status(session.sessionId).agents,[{agent:'Idle collaborator',activeCalls:0}]);
+    assert.deepEqual(b.sessions.status(session.sessionId).agents,[{agent:'Idle collaborator',activeCalls:0,waitingCalls:0,waitingFor:[]}]);
   } finally { peer?.terminate(); await b.close(); await fs.rm(dir, { recursive: true, force: true }); }
 });
 
