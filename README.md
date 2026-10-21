@@ -18,7 +18,7 @@ Read [the plugin manifest](plugin.json) for its identity, [the MCP configuration
 
 ## Status and requirements
 
-**The native Codex panel was validated with version 0.5.0 on 2026-10-20.** A real `pencil_new` tool call opened the MCP App in the side panel automatically. The hosted engine connected, accepted a newly created frame and saved it through the panel's **Enregistrer** button. The saved source file was read back from disk. No browser preview was used for this test. This verifies the tested host, not every Codex version or configuration.
+**The native Codex panel was validated with version 0.5.1 on 2026-10-21.** A real `pencil_open` call opened the side panel automatically. Two actual model sub-agents created their own designs in the same document. Native editing, panel-button saving, captures and a persistent 3.18-MB document were exercised from a clean installation without development dependencies. Read [the measured validation report](docs/installed-validation.md) for timings and hidden-panel limitations. This verifies the tested host, not every Codex version or configuration.
 
 The native view uses the standard MCP Apps host bridge (`app.callServerTool`). The Node server relays messages to the authenticated local service; the iframe does not open a loopback WebSocket.
 
@@ -36,7 +36,7 @@ The plugin does not redistribute the proprietary Pencil engine and does not work
 
 The native view declares no direct connection domains. Its internal `pencil_editor_bridge` tool is visible only to the app and uses a private connection capability with a two-minute inactivity expiry after authenticating the session grant. A bridge failure stops the channel without replaying messages or falling back to a browser. The standalone development preview retains its direct WebSocket transport.
 
-The native bridge waits up to five seconds per quiet receive poll (about 0.2 polls/second, before host overhead). Sending runs independently, so a quiet poll does not hold engine responses or Save requests. Messages are split into ordered chunks of at most 32768 JavaScript string characters, with at most four chunks per tool exchange; chunks are reassembled before dispatch. Missing or reordered chunks close the channel rather than replaying a mutation. `pencil_status.bridge` exposes per-view exchange/push counts and timestamps for measurement. Hidden views can retain an idle connection for two minutes; an actual host teardown still closes it. This is not a guarantee that every host keeps hidden JavaScript running.
+The native bridge waits up to five seconds per quiet receive poll (about 0.2 polls/second, before host overhead). Sending runs independently, so a quiet poll does not hold engine responses or Save requests. Messages are split into ordered chunks of at most 32768 JavaScript string characters, with at most four chunks per tool exchange; chunks are reassembled before dispatch. Missing or reordered chunks close the channel rather than replaying a mutation. `pencil_status.bridge` exposes per-view exchange/push counts and timestamps for measurement. The relay expires after two minutes without traffic; an actual host teardown closes it. A visually masked panel remained operational for over 30 seconds in the tested host, which still reported its document as visible. Suspended or minimized webviews are not covered by that test.
 
 ## Installation
 
