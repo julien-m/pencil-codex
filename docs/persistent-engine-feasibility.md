@@ -1,6 +1,6 @@
 # Persistent engine feasibility
 
-The requested adaptation is **not validated**. This branch contains diagnostic probes, not a production engine adapter. No installed plugin or Codex application file was replaced.
+The original two-editor adaptation failed its live synchronization check. This branch now also contains a working prototype that presents the **same persistent renderer**, with real interaction and isolation checks. Read [the remote renderer experiment](remote-renderer-experiment.md) for the new results and remaining host-integration limits. No installed plugin or Codex application file was replaced.
 
 ## Preserved baseline
 
@@ -52,6 +52,6 @@ An initial navigation encountered a transient DNS error. A separate explicit-rel
 
 ## Next integration requirement
 
-A complete implementation needs either a Pen-supported live document/view transport or a design that presents the very same persistent renderer inside Codex. The latter has not been implemented or assessed for interaction latency, clipboard handling, accessibility or resource usage here. A global MCP connection alone satisfies neither requirement.
+A complete implementation needs either a Pen-supported live document/view transport or a design that presents the very same persistent renderer inside Codex. The latter is now implemented as an opt-in prototype; read [its validation and limits](remote-renderer-experiment.md). Clipboard handling, accessibility, resource usage and native MCP App presentation still require further work. A global MCP connection alone supplies neither document ownership nor a view.
 
 Modern Web Guidance was searched for preserving embedded document state. No guide was applied: the changes are protocol probes, and no product interface was changed.

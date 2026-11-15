@@ -5,12 +5,14 @@ import { encodeMessage, MessageDecoder, BRIDGE_BATCH_CHUNKS } from '../shared/br
 // The app talks to its originating MCP server, not to a loopback URL.
 // Only this Node-side transport opens the existing authenticated editor socket.
 export class UiRelay {
-  constructor({ idleTimeout = 120000, pollTimeout = 5000, maxBytes = 40 * 1024 * 1024 } = {}) {
+  constructor({ idleTimeout = 120000, pollTimeout = 5000, maxBytes = 40 * 1024 * 1024, endpoint = '/editor', origin } = {}) {
     this.connections = new Map();
     this.idleTimeout = idleTimeout; this.pollTimeout = pollTimeout; this.maxBytes = maxBytes;
+    if (!['/editor', '/view'].includes(endpoint)) throw new Error('Unsupported relay endpoint');
+    this.endpoint = endpoint; this.origin = origin;
   }
   async connect({ port, sessionId, editorToken }) {
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/editor?session=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(editorToken)}`, { maxPayload: this.maxBytes, handshakeTimeout: 2000 });
+    const socket = new WebSocket(`ws://127.0.0.1:${port}${this.endpoint}?session=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(editorToken)}`, { maxPayload: this.maxBytes, handshakeTimeout: 2000, origin: this.origin });
     const connectionId = randomUUID();
     const state = { sessionId, openedAt: Date.now(), exchanges: 0, pushes: 0, receivedMessages: 0, sentMessages: 0, decoder: new MessageDecoder(), socket, messages: [], bytes: 0, waiting: null, polling: false, closed: false };
     socket.on('error', () => {});

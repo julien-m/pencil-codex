@@ -40390,14 +40390,17 @@ var MessageDecoder = class {
 
 // src/ui-relay.mjs
 var UiRelay = class {
-  constructor({ idleTimeout = 12e4, pollTimeout = 5e3, maxBytes = 40 * 1024 * 1024 } = {}) {
+  constructor({ idleTimeout = 12e4, pollTimeout = 5e3, maxBytes = 40 * 1024 * 1024, endpoint = "/editor", origin } = {}) {
     this.connections = /* @__PURE__ */ new Map();
     this.idleTimeout = idleTimeout;
     this.pollTimeout = pollTimeout;
     this.maxBytes = maxBytes;
+    if (!["/editor", "/view"].includes(endpoint)) throw new Error("Unsupported relay endpoint");
+    this.endpoint = endpoint;
+    this.origin = origin;
   }
   async connect({ port, sessionId, editorToken }) {
-    const socket = new import_websocket.default(`ws://127.0.0.1:${port}/editor?session=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(editorToken)}`, { maxPayload: this.maxBytes, handshakeTimeout: 2e3 });
+    const socket = new import_websocket.default(`ws://127.0.0.1:${port}${this.endpoint}?session=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(editorToken)}`, { maxPayload: this.maxBytes, handshakeTimeout: 2e3, origin: this.origin });
     const connectionId = randomUUID();
     const state = { sessionId, openedAt: Date.now(), exchanges: 0, pushes: 0, receivedMessages: 0, sentMessages: 0, decoder: new MessageDecoder(), socket, messages: [], bytes: 0, waiting: null, polling: false, closed: false };
     socket.on("error", () => {
