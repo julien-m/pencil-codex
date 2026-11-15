@@ -8,6 +8,7 @@ The requested adaptation is **not validated**. This branch contains diagnostic p
 - Backup branch: `backup/before-persistent-engine-2026-11-15`.
 - Experiment: `feat/persistent-session-engine`, in a separate worktree.
 - The installed vendor plugin `pen-dev` (`0.1.3`) is a different implementation; its executable and editor were not changed.
+- An exact local backup of that installed vendor package is kept in `.runtime/vendor-baseline/pen-dev-0.1.3/`. Check [the SHA-256 manifest](vendor-baseline.sha256) to compare every file. The vendor package is not redistributed in Git.
 
 ## Required behavior
 
