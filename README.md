@@ -18,6 +18,8 @@ Read [the plugin manifest](plugin.json) for its identity, [the MCP configuration
 
 ## Status and requirements
 
+An experimental `feat/persistent-session-engine` branch investigates retaining independent chat documents while moving execution out of the Codex view. Read [the feasibility results](docs/persistent-engine-feasibility.md) before using that branch: native multi-document isolation passed, but live synchronization with the embedded editor remains unvalidated. The experiment does not change the installed plugin.
+
 **The native Codex panel was validated with version 0.5.1 on 2026-10-21.** A real `pencil_open` call opened the side panel automatically. Two actual model sub-agents created their own designs in the same document. Native editing, panel-button saving, captures and a persistent 3.18-MB document were exercised from a clean installation without development dependencies. Read [the measured validation report](docs/installed-validation.md) for timings and hidden-panel limitations. This verifies the tested host, not every Codex version or configuration.
 
 The native view uses the standard MCP Apps host bridge (`app.callServerTool`). The Node server relays messages to the authenticated local service; the iframe does not open a loopback WebSocket.
