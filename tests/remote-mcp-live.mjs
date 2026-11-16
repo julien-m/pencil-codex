@@ -5,13 +5,20 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { MessageDecoder } from '../shared/bridge-wire.mjs';
 
-const [runtime, output] = process.argv.slice(2), probe = JSON.parse(await readFile(path.join(runtime, 'probe.json'), 'utf8'));
-const transport = new StdioClientTransport({ command: process.execPath, args: ['experiments/remote-engine/mcp.mjs'], env: { ...process.env, PENCIL_REMOTE_CONNECTION: path.join(runtime, 'connection.json') }, stderr: 'pipe' });
+const [runtimeArgument, output, packageDirectory] = process.argv.slice(2), runtime = path.resolve(runtimeArgument);
+const probe = JSON.parse(await readFile(path.join(runtime, 'probe.json'), 'utf8'));
+const configuration = packageDirectory ? JSON.parse(await readFile(path.join(packageDirectory, 'mcp.json'), 'utf8')).mcpServers['pen-remote'] : null;
+const expand = value => value.replaceAll('${PLUGIN_ROOT}', path.resolve(packageDirectory));
+const entrypoint = configuration ? expand(configuration.args[0]) : 'experiments/remote-engine/mcp.mjs';
+const environment = configuration ? Object.fromEntries(Object.entries(configuration.env).map(([key, value]) => [key, expand(value)])) : { PENCIL_REMOTE_CONNECTION: path.join(runtime, 'connection.json') };
+const transport = new StdioClientTransport({ command: process.execPath, args: [entrypoint], env: { ...process.env, ...environment }, stderr: 'pipe' });
 transport.stderr.on('data', () => {});
 const client = new Client({ name: 'remote-mcp-live-probe', version: '1.0.0' });
 const call = async (name, args) => { const result = await client.callTool({ name, arguments: args }, undefined, { timeout: 10_000 }); assert(!result.isError, JSON.stringify(result.content)); return result; };
 try {
   await client.connect(transport, { timeout: 10_000 });
+  const missingScope = await client.callTool({ name: 'pencil_open', arguments: { path: path.join(runtime, 'documents', `${probe.a.scope}-0.pen`) } }, undefined, { timeout: 2000 });
+  assert(missingScope.isError, 'A global MCP process must not silently identify every chat as one scope');
   const result = await call('pencil_open', { path: path.join(runtime, 'documents', `${probe.a.scope}-0.pen`), scope: probe.a.scope });
   assert.equal(result.structuredContent.renderer.rendererId, probe.a.renderer.rendererId);
   assert(!JSON.stringify(result.structuredContent).includes('viewURL'), 'The model result must not expose the view grant');

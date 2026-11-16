@@ -3,8 +3,6 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { randomUUID } from 'node:crypto';
-import { build } from 'esbuild';
 import { UiRelay } from '../../src/ui-relay.mjs';
 import { BRIDGE_BATCH_CHUNKS } from '../../shared/bridge-wire.mjs';
 
@@ -13,7 +11,7 @@ const connection = z.object({ origin: z.string().url(), token: z.string().uuid()
 const origin = new URL(connection.origin);
 if (origin.protocol !== 'http:' || origin.hostname !== '127.0.0.1' || !origin.port || origin.username || origin.password) throw new Error('The experiment requires a local supervised service');
 const server = new McpServer({ name: 'pencil-persistent-renderer', version: '0.6.0-experiment' });
-const resource = 'ui://pencil-remote/editor.html', scope = process.env.CODEX_THREAD_ID ?? randomUUID();
+const resource = 'ui://pencil-remote/editor.html';
 const relay = new UiRelay({ endpoint: '/view', origin: origin.origin });
 const object = result => ({ content: [{ type: 'text', text: JSON.stringify(result) }], structuredContent: result });
 const wrap = fn => async args => {
@@ -28,17 +26,22 @@ async function rpc(method, args) {
 let resourceHTML;
 server.registerResource('persistent-pen-view', resource, {}, async () => {
   if (!resourceHTML) {
-    const built = await build({ entryPoints: [fileURLToPath(new URL('view.mjs', import.meta.url))], bundle: true, format: 'iife', platform: 'browser', write: false, minify: true });
-    const html = await readFile(new URL('view.html', import.meta.url), 'utf8');
-    resourceHTML = html.replace('<script type="module" src="/view.mjs"></script>', `<script>window.pencilRemoteApp=true;${built.outputFiles[0].text.replace(/<\/script/gi, '<\\/script')}</script>`);
+    if (process.env.PENCIL_REMOTE_VIEW) resourceHTML = await readFile(process.env.PENCIL_REMOTE_VIEW, 'utf8');
+    else {
+      // Source-checkout mode only; installed packages use a prebuilt resource.
+      const { build } = await import('esbuild');
+      const built = await build({ entryPoints: [fileURLToPath(new URL('view.mjs', import.meta.url))], bundle: true, format: 'iife', platform: 'browser', write: false, minify: true });
+      const html = await readFile(new URL('view.html', import.meta.url), 'utf8');
+      resourceHTML = html.replace('<script type="module" src="/view.mjs"></script>', `<script>window.pencilRemoteApp=true;${built.outputFiles[0].text.replace(/<\/script/gi, '<\\/script')}</script>`);
+    }
   }
   return { contents: [{ uri: resource, mimeType: 'text/html;profile=mcp-app', text: resourceHTML, _meta: { ui: { csp: { connectDomains: [], frameDomains: [] } }, 'openai/ui': { availableDisplayModes: ['fullscreen'], preferredDisplayMode: 'fullscreen' } } }] };
 });
 for (const [name, method] of [['pencil_open', 'open'], ['pencil_new', 'new']]) server.registerTool(name, {
-  description: 'Open the view of this chat’s persistent renderer. Other chats keep separate documents; agents in this chat share its sessionId.',
-  inputSchema: { path: z.string().min(1), scope: z.string().max(200).optional() }, _meta: { ui: { resourceUri: resource } },
+  description: 'Open this chat’s persistent renderer. Pass the current chat ID as scope, or a unique scope allocated once for this chat. Reuse its returned sessionId for collaborating agents. A global MCP process is never used as a chat identity. Other chats must use distinct scopes and documents.',
+  inputSchema: { path: z.string().min(1), scope: z.string().min(1).max(200) }, _meta: { ui: { resourceUri: resource } },
 }, wrap(async args => {
-  const { viewURL, ...session } = await rpc(method, { ...args, scope: args.scope ?? scope });
+  const { viewURL, ...session } = await rpc(method, args);
   const grant = new URLSearchParams(new URL(viewURL).hash.slice(1));
   return { ...object(session), _meta: { editor: { sessionId: session.sessionId, editorToken: grant.get('token') } } };
 }));

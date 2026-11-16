@@ -10,6 +10,8 @@ The existing broker owns the session, document path, participation leases and sa
 
 The view receives JPEG frames and forwards validated pointer, keyboard, wheel and plain-text input. Its `rendererId` identifies the engine instance. Closing a view stops its screencast and releases held input, leaving the renderer connected to the broker. Reopening the view attaches to that instance. All views share selection, focus and undo history because they show one editor.
 
+The experimental MCP adapter requires an explicit nonempty `scope` on open/new. Use the current chat ID or a unique scope allocated once for that chat, then pass the returned session ID to its agents. A global MCP process and its startup environment cannot reliably identify the current chat. The adapter therefore has no process-wide default scope. Scopes and leases coordinate trusted clients; they are not authenticated user/chat identities supplied by Codex.
+
 The standalone view uses an authenticated loopback WebSocket. The experimental MCP App uses the existing chunked server-tool relay to carry those same frames and inputs; its resource contains no Pen iframe and declares no external connection domains. Session view grants are returned in app metadata, separate from model-visible tool results. Administrative credentials stay in the private runtime directory.
 
 ## Reproduce locally
@@ -41,7 +43,29 @@ The opt-in stdio MCP entrypoint is [the experimental adapter](../experiments/rem
 PENCIL_REMOTE_CONNECTION=<absolute-runtime>/connection.json node experiments/remote-engine/mcp.mjs
 ```
 
-Its open/new tools return the remote-view MCP App resource. This adapter requires development dependencies and the separately running service. Do not replace the installed vendor configuration with it as part of a feasibility test.
+Its open/new tools return the remote-view MCP App resource. Source mode requires development dependencies and the separately running service. Do not replace the installed vendor configuration with it as part of a feasibility test.
+
+## Separate local Codex plugin
+
+Build a separate package, with the service already running and an empty destination:
+
+```bash
+bun scripts/build-remote-plugin.ts <absolute-runtime> <absolute-package-destination>
+codex plugin marketplace add <absolute-package-destination> --json
+codex plugin add pen-remote@pen-remote-local --json
+```
+
+The generated **Pen Remote** plugin contains a bundled Node MCP server and prebuilt MCP App HTML. Its installed process does not require development dependencies. Local manifest paths reference the supervised runtime; connection tokens and documents are not copied into the package. The service remains separate and must be available. A temporary service's expiration also ends the experiment's availability.
+
+Activate Pen Remote in the target chat. The currently running agent may not expose newly installed tools until another turn or host reload. Installation alone proves neither activation nor native view rendering. The existing pen.dev plugin remains installed separately.
+
+The installed-package transport probe uses the actual cache directory:
+
+```bash
+node tests/remote-mcp-live.mjs <absolute-runtime> <receipt.json> <installed-package-directory>
+```
+
+It verifies required scope rejection, same-renderer attachment, the generated resource and an actual JPEG through MCP. It is a scripted stdio client, not a native Codex rendering test. For native acceptance, open one document with this chat's scope, verify the rendered view, record its renderer ID, switch to another chat, modify the first session through its agents while hidden, and return to verify the same renderer and updated content. The other chat must use its own scope and document. Do not count browser-panel opening as plugin-view acceptance.
 
 ## Observed validation
 
