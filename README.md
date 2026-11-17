@@ -21,6 +21,33 @@ node /absolute/path/pencil/dist/persistent-service.mjs <port> <chrome-executable
 
 It requires Chrome, `playwright-core` and network access to `https://app.pen.dev`. Use `~/Library/Application Support/Pencil/codex` as the normal private runtime directory. The MCP adapter reads its `connection.json` there independently of plugin cache paths; `PENCIL_CONNECTION` overrides the connection file. The service must be supervised as permanent, with autostart and restart on failure. MCP clients do not launch or stop it. Never publish connection tokens or private view URLs.
 
+## Codex CLI
+
+The CLI can use this same persistent Pencil MCP server without displaying a native MCP App. If installing the plugin does not expose its `pencil_*` tools in the CLI, register the canonical built server under a distinct name so it is not confused with the Mac Pen application’s `pencil` server:
+
+```bash
+codex mcp add pencil-plugin -- node /absolute/path/pencil/dist/pencil.mjs
+```
+
+Use the canonical checkout’s built entrypoint so the path remains stable across versioned plugin cache updates. The CLI tools then have names such as `mcp__pencil_plugin__pencil_open`. A normal `codex` or `codex exec` launch loads this configuration automatically.
+
+Non-interactive runs cannot display approval prompts. Preauthorize only the operations the user has approved, using [per-tool MCP approval settings](https://learn.chatgpt.com/docs/extend/mcp?surface=cli). For the open/edit/close verification performed here, the local configuration uses:
+
+```toml
+[mcp_servers.pencil-plugin]
+command = "node"
+args = ["/absolute/path/pencil/dist/pencil.mjs"]
+default_tools_approval_mode = "prompt"
+tools.pencil_open = { approval_mode = "approve" }
+tools.pencil_begin = { approval_mode = "approve" }
+tools.pencil_tools = { approval_mode = "approve" }
+tools.pencil_call = { approval_mode = "approve" }
+tools.pencil_close = { approval_mode = "approve" }
+tools.pencil_status = { approval_mode = "approve" }
+```
+
+Other operations keep the server’s prompt policy. These permissions apply only to this server; no global approval or sandbox policy is changed. Finish every disposable CLI test with `pencil_close`, then confirm the session is absent with `pencil_status`.
+
 ## Sessions and resource lifetime
 
 The service owns one headless Chrome browser and one isolated context/page per design session. The native view displays the same editor that agents modify; it does not start a second editor.

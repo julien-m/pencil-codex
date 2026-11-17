@@ -23,3 +23,5 @@ description: Open and edit Pencil documents through this plugin, including concu
 - When the whole document task is finished, use `pencil_close` with the sole remaining lease. It saves, closes that session’s views and releases only its engine. Success consumes the lease: do not call `pencil_end` afterward.
 - A failed Save retains the editor; do not retry mutations after an unknown outcome. Explicitly open the saved document again when needed.
 - The service connection defaults to the user’s `Library/Application Support/Pencil/codex/connection.json`; `PENCIL_CONNECTION` can override it. Do not start unmanaged services or expose connection credentials.
+
+- In the Codex CLI, the configured `pencil-plugin` server exposes names such as `mcp__pencil_plugin__pencil_open`. Use those session tools, not the separate Mac Pen desktop tools. A CLI session does not certify a native view; preauthorized tools are required for unattended calls. Never change approval settings yourself unless the user explicitly authorizes it.
