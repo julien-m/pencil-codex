@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "pencil",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Persistent Pencil editor with a native Codex view and shared per-session engine.",
   "author": {
     "name": "Julien M"

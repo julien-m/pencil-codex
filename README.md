@@ -1,6 +1,6 @@
 # Pencil for Codex
 
-Pencil 0.7.0 uses a persistent editor per design session. Agents keep working while the native panel is closed. `pencil_close` saves and releases the finished session without stopping other documents or the shared service. This replaces the separately installed Pen Remote experiment.
+Pencil 0.7.1 uses a persistent editor per design session. Agents keep working while the native panel is closed. `pencil_close` saves and releases the finished session without stopping other documents or the shared service. This replaces the separately installed Pen Remote experiment.
 
 ## Installation and service
 
@@ -19,7 +19,7 @@ Use `Library/Application Support/Pencil/codex` under the user directory for the 
 
 Open via `pencil_open` or `pencil_new` with a unique chat scope. `pencil_begin` joins; tools operate on the shared engine. `pencil_end` only leaves; `pencil_close` saves and disposes the final participant’s session. Another participant or pending operation prevents closure. Read [the lifecycle and migration details](docs/pencil-persistent.md).
 
-Earlier UI/engine validation reports below describe their stated historical versions, not fresh validation of0.7.0.
+Earlier UI/engine validation reports below describe their stated historical versions, not fresh validation of 0.7.1.
 
 ## Repository and platform
 

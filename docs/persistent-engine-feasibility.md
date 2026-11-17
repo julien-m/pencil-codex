@@ -52,6 +52,6 @@ An initial navigation encountered a transient DNS error. A separate explicit-rel
 
 ## Next integration requirement
 
-A complete implementation needs either a Pen-supported live document/view transport or a design that presents the very same persistent renderer inside Codex. The latter was validated as Pen Remote and is now promoted as Pencil0.7.0; read [its validation and limits](remote-renderer-experiment.md). Clipboard handling, accessibility, resource usage and native MCP App presentation still require further work. A global MCP connection alone supplies neither document ownership nor a view.
+A complete implementation needs either a Pen-supported live document/view transport or a design that presents the very same persistent renderer inside Codex. The latter was validated as Pen Remote and is now promoted as Pencil 0.7.1; read [its validation and limits](remote-renderer-experiment.md). Clipboard handling, accessibility, resource usage and native MCP App presentation still require further work. A global MCP connection alone supplies neither document ownership nor a view.
 
 Modern Web Guidance was searched for preserving embedded document state. No guide was applied: the changes are protocol probes, and no product interface was changed.

@@ -2,7 +2,7 @@
 
 The implementation originally tested here runs one invisible Pen renderer per design session in a shared headless Chrome process. Agents and the interactive view operate on that renderer. There is no second Pen editor in the view and no synchronization between independent document states.
 
-Pencil0.7.0 promotes this implementation on main. The official vendor plugin and Codex application are separate; the notes below retain the historical experiment evidence.
+Pencil 0.7.1 promotes this implementation on main. The official vendor plugin and Codex application are separate; the notes below retain the historical experiment evidence.
 
 ## Ownership and transport
 
@@ -47,7 +47,7 @@ Its open/new tools return the remote-view MCP App resource. Source mode requires
 
 ## Promotion to Pencil
 
-This historical experiment is now the Pencil0.7.0 implementation. Read [the canonical installation and lifecycle](pencil-persistent.md). The former package builder and separate Pen Remote installation have been removed; install `pencil@pencil` from the canonical repository. Measurements below describe the versions and dates stated.
+This historical experiment is now the Pencil 0.7.1 implementation. Read [the canonical installation and lifecycle](pencil-persistent.md). The former package builder and separate Pen Remote installation have been removed; install `pencil@pencil` from the canonical repository. Measurements below describe the versions and dates stated.
 
 ## Observed validation
 

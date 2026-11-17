@@ -1,6 +1,6 @@
 # Persistent Pencil
 
-Version0.7.0 promotes the tested Pen Remote renderer to the Pencil plugin. Canonical source is `src/persistent`; the installed MCP entrypoint is `dist/pencil.mjs` and the separately supervised service is `dist/persistent-service.mjs`. The old panel modules remain only for compatibility tests and historical tooling; the manifest selects the persistent entrypoint.
+Version 0.7.1 promotes the tested Pen Remote renderer to the Pencil plugin. Canonical source is `src/persistent`; the installed MCP entrypoint is `dist/pencil.mjs` and the separately supervised service is `dist/persistent-service.mjs`. The old panel modules remain only for compatibility tests and historical tooling; the manifest selects the persistent entrypoint.
 
 The core owns sessions, leases, Save and conflict rules. The renderer owns one Chrome context/page per session in its shared browser. Views attach to its pixels and input stream. Closing a view leaves the engine alive. `pencil_close` requires a sole lease, freezes admissions/input, confirms Save, records durable closed intent and releases that context. Unknown disposal outcomes remain quarantined. Automatic view recovery never replays mutations or resurrects intentionally closed sessions.
 

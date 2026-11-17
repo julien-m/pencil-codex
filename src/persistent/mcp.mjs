@@ -22,7 +22,7 @@ async function readConnection() {
   if (origin.protocol !== 'http:' || origin.hostname !== '127.0.0.1' || !origin.port || origin.username || origin.password) throw new Error('Pencil requires a local supervised service');
   return { origin: origin.origin, token: connection.token };
 }
-const server = new McpServer({ name: 'pencil', version: '0.7.0' });
+const server = new McpServer({ name: 'pencil', version: '0.7.1' });
 const resource = 'ui://pencil/editor-v7.html';
 let relay;
 const object = result => ({ content: [{ type: 'text', text: JSON.stringify(result) }], structuredContent: result });
