@@ -18,7 +18,7 @@ await build({ entryPoints: [path.join(root, 'experiments/remote-engine/mcp.mjs')
 const json = async (name: string, value: unknown): Promise<void> => { await writeFile(path.join(destination, name), JSON.stringify(value, null, 2) + '\n'); };
 await json('plugin.json', {
   $schema: 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
-  name: 'pen-remote', version: '0.1.0', description: 'Experimental Pen view of a persistent per-chat renderer.',
+  name: 'pen-remote', version: '0.1.1', description: 'Experimental Pen view of a persistent per-chat renderer.',
   author: { name: 'Julien M' }, license: 'MIT',
   extensions: { 'com.openai': { interface: { displayName: 'Pen Remote', shortDescription: 'Persistent Pen renderer experiment', developerName: 'Julien M', category: 'Productivity', capabilities: ['Interactive', 'Read', 'Write'], defaultPrompt: ['Open my session document in Pen Remote'] } } },
 });

@@ -22,6 +22,8 @@ The experimental `feat/persistent-session-engine` branch now includes a persiste
 
 The branch can also build a separate **Pen Remote** local plugin with a precompiled MCP App resource. Its adapter requires an explicit chat scope; it never treats a global MCP process as the current chat. Read [the local installation steps](docs/remote-renderer-experiment.md#separate-local-codex-plugin) before testing it. Native Codex rendering and changing chats remain acceptance checks, separate from the installed-package transport tests.
 
+Pen Remote 0.1.1 exposes its MCP tools while the engine is offline and reads the current supervised connection on each engine call. An absent connection file no longer terminates tool discovery. Keep the supervised service persistent when using the installed experimental plugin across app restarts.
+
 **The native Codex panel was validated with version 0.5.1 on 2026-10-21.** A real `pencil_open` call opened the side panel automatically. Two actual model sub-agents created their own designs in the same document. Native editing, panel-button saving, captures and a persistent 3.18-MB document were exercised from a clean installation without development dependencies. Read [the measured validation report](docs/installed-validation.md) for timings and hidden-panel limitations. This verifies the tested host, not every Codex version or configuration.
 
 The native view uses the standard MCP Apps host bridge (`app.callServerTool`). The Node server relays messages to the authenticated local service; the iframe does not open a loopback WebSocket.

@@ -22,7 +22,7 @@ Install dependencies with `bun install --frozen-lockfile`. Register [the experim
 node experiments/remote-engine/server.mjs <port> <chrome-executable> <private-runtime-directory>
 ```
 
-Use temporary lifetime, manual autostart and no automatic restart for a diagnostic run. The service writes `connection.json` with mode `0600`; do not publish it. It is not started by the default plugin.
+Use temporary lifetime, manual autostart and no automatic restart for a one-off diagnostic run. Once an installed Pen Remote plugin points to this service for continued use, manage it as a persistent service: supervisor autostart, restart on failure and no expiration. The service writes `connection.json` with mode `0600`; do not publish it. It is not started by the default plugin.
 
 Run the isolated two-document probe, then the transport/security checks:
 
@@ -57,6 +57,8 @@ codex plugin add pen-remote@pen-remote-local --json
 
 The generated **Pen Remote** plugin contains a bundled Node MCP server and prebuilt MCP App HTML. Its installed process does not require development dependencies. Local manifest paths reference the supervised runtime; connection tokens and documents are not copied into the package. The service remains separate and must be available. A temporary service's expiration also ends the experiment's availability.
 
+Version 0.1.1 keeps MCP discovery available even when the supervised engine is stopped or its connection file is absent. Engine calls report unavailability without terminating MCP. Each new call reads and validates the current connection, allowing recovery after the service starts or rotates its credential. This does not replay failed operations or restore live document sessions after a crash.
+
 Activate Pen Remote in the target chat. The currently running agent may not expose newly installed tools until another turn or host reload. Installation alone proves neither activation nor native view rendering. The existing pen.dev plugin remains installed separately.
 
 The installed-package transport probe uses the actual cache directory:
@@ -64,6 +66,8 @@ The installed-package transport probe uses the actual cache directory:
 ```bash
 node tests/remote-mcp-live.mjs <absolute-runtime> <receipt.json> <installed-package-directory>
 ```
+
+Add `--delayed-connection` after the package directory to verify offline initialization followed by a successful connection to the real engine in the same MCP process. The ordinary suite also checks missing and subsequently invalid connection configuration without requiring a live engine.
 
 It verifies required scope rejection, same-renderer attachment, the generated resource and an actual JPEG through MCP. It is a scripted stdio client, not a native Codex rendering test. For native acceptance, open one document with this chat's scope, verify the rendered view, record its renderer ID, switch to another chat, modify the first session through its agents while hidden, and return to verify the same renderer and updated content. The other chat must use its own scope and document. Do not count browser-panel opening as plugin-view acceptance.
 
@@ -90,7 +94,7 @@ These clients are scripted test clients, not independent language-model agents. 
 - Native MCP App rendering inside the current Codex host has not been observed. The tool transport and browser view were tested separately. A request to open the browser view in Codex returned `queued`, which does not prove that the panel rendered it.
 - The remote image lacks a semantic accessibility tree. Clipboard integration, IME/composition, file dialogs, login popups and generation workflows have not been validated. Plain-text insertion is supported; native clipboard parity is not claimed.
 - The viewport is fixed at 1280×800. Latency, memory use with many sessions and bandwidth have not been benchmarked. No quality or frame-rate guarantee is made.
-- Browser/service crashes end the live engine; drafts remain subject to existing save/recovery rules. Automatic engine restoration, session eviction and service startup at login are not implemented.
+- Browser/service crashes end the live document sessions; drafts remain subject to existing save/recovery rules. Automatic document-session restoration and eviction are not implemented. Localhost Supervisor can restart the service and start it at login; clients must reopen their document afterward.
 - The hosted Pen engine still requires network access. The prototype does not redistribute it or provide offline execution.
 
 Modern Web Guidance guides `drag` and `validate-origins` were applied: pointer capture preserves release events, and the iframe bridge checks the exact sender and normalized origin.

@@ -7,18 +7,28 @@ import { UiRelay } from '../../src/ui-relay.mjs';
 import { BRIDGE_BATCH_CHUNKS } from '../../shared/bridge-wire.mjs';
 
 const connectionPath = process.env.PENCIL_REMOTE_CONNECTION ?? fileURLToPath(new URL('../../.runtime/remote-engine/connection.json', import.meta.url));
-const connection = z.object({ origin: z.string().url(), token: z.string().uuid() }).parse(JSON.parse(await readFile(connectionPath, 'utf8')));
-const origin = new URL(connection.origin);
-if (origin.protocol !== 'http:' || origin.hostname !== '127.0.0.1' || !origin.port || origin.username || origin.password) throw new Error('The experiment requires a local supervised service');
+async function readConnection() {
+  let bytes;
+  try { bytes = await readFile(connectionPath, 'utf8'); }
+  catch (error) {
+    if (error.code === 'ENOENT') throw new Error('The supervised Pen engine is unavailable. Start its service and retry; no engine call was sent.');
+    throw error;
+  }
+  const connection = z.object({ origin: z.string().url(), token: z.string().uuid() }).parse(JSON.parse(bytes));
+  const origin = new URL(connection.origin);
+  if (origin.protocol !== 'http:' || origin.hostname !== '127.0.0.1' || !origin.port || origin.username || origin.password) throw new Error('The experiment requires a local supervised service');
+  return { origin: origin.origin, token: connection.token };
+}
 const server = new McpServer({ name: 'pencil-persistent-renderer', version: '0.6.0-experiment' });
 const resource = 'ui://pencil-remote/editor.html';
-const relay = new UiRelay({ endpoint: '/view', origin: origin.origin });
+let relay;
 const object = result => ({ content: [{ type: 'text', text: JSON.stringify(result) }], structuredContent: result });
 const wrap = fn => async args => {
   try { return await fn(args); } catch (error) { return { isError: true, content: [{ type: 'text', text: error.message }] }; }
 };
 async function rpc(method, args) {
-  const response = await fetch(`${origin.origin}/rpc`, { method: 'POST', headers: { Authorization: `Bearer ${connection.token}` }, body: JSON.stringify({ method, args }), signal: AbortSignal.timeout(85_000) });
+  const connection = await readConnection();
+  const response = await fetch(`${connection.origin}/rpc`, { method: 'POST', headers: { Authorization: `Bearer ${connection.token}` }, body: JSON.stringify({ method, args }), signal: AbortSignal.timeout(85_000) });
   const body = await response.json();
   if (body.error) throw new Error(typeof body.error === 'string' ? body.error : body.error.message);
   return body.result;
@@ -65,12 +75,19 @@ server.registerTool('pencil_editor_bridge', {
 }, wrap(async args => {
   if (args.action === 'connect') {
     if (!args.sessionId || !args.editorToken) throw new Error('A view grant is required');
-    return object(await relay.connect({ port: Number(origin.port), sessionId: args.sessionId, editorToken: args.editorToken }));
+    const connection = await readConnection();
+    // Replace only the view relay if the supervised endpoint itself changes.
+    if (relay?.origin !== connection.origin) {
+      relay?.closeAll();
+      relay = new UiRelay({ endpoint: '/view', origin: connection.origin });
+    }
+    return object(await relay.connect({ port: Number(new URL(connection.origin).port), sessionId: args.sessionId, editorToken: args.editorToken }));
   }
   if (!args.connectionId) throw new Error('A view connection is required');
+  if (!relay) throw new Error('A view connection must be established first');
   if (args.action === 'send') return object(relay.send(args.connectionId, args.messages));
   if (args.action === 'close') { relay.close(args.connectionId); return object({ closed: true }); }
   return object(await relay.exchange(args.connectionId, args.messages));
 }));
-process.on('SIGTERM', () => { relay.closeAll(); process.exit(0); });
+process.on('SIGTERM', () => { relay?.closeAll(); process.exit(0); });
 await server.connect(new StdioServerTransport());
