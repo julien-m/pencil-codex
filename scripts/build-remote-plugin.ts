@@ -12,13 +12,14 @@ await stat(path.join(runtime, 'connection.json'));
 await mkdir(destination, { recursive: false, mode: 0o700 });
 const view = await build({ entryPoints: [path.join(root, 'experiments/remote-engine/view.mjs')], bundle: true, format: 'iife', platform: 'browser', write: false, minify: true });
 const template = await readFile(path.join(root, 'experiments/remote-engine/view.html'), 'utf8');
-const html = template.replace('<script type="module" src="/view.mjs"></script>', `<script>window.pencilRemoteApp=true;${view.outputFiles[0].text.replace(/<\/script/gi, '<\\/script')}</script>`);
+// A callback preserves literal $&/$`/$' sequences inside bundled dependencies.
+const html = template.replace('<script type="module" src="/view.mjs"></script>', () => `<script>window.pencilRemoteApp=true;${view.outputFiles[0].text.replace(/<\/script/gi, '<\\/script')}</script>`);
 await writeFile(path.join(destination, 'view.html'), html);
 await build({ entryPoints: [path.join(root, 'experiments/remote-engine/mcp.mjs')], bundle: true, platform: 'node', format: 'esm', target: 'node22', external: ['esbuild'], banner: { js: "import { createRequire as remoteCreateRequire } from 'node:module';const require=remoteCreateRequire(import.meta.url);" }, outfile: path.join(destination, 'server.mjs') });
 const json = async (name: string, value: unknown): Promise<void> => { await writeFile(path.join(destination, name), JSON.stringify(value, null, 2) + '\n'); };
 await json('plugin.json', {
   $schema: 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
-  name: 'pen-remote', version: '0.1.1', description: 'Experimental Pen view of a persistent per-chat renderer.',
+  name: 'pen-remote', version: '0.1.2', description: 'Experimental Pen view of a persistent per-chat renderer.',
   author: { name: 'Julien M' }, license: 'MIT',
   extensions: { 'com.openai': { interface: { displayName: 'Pen Remote', shortDescription: 'Persistent Pen renderer experiment', developerName: 'Julien M', category: 'Productivity', capabilities: ['Interactive', 'Read', 'Write'], defaultPrompt: ['Open my session document in Pen Remote'] } } },
 });

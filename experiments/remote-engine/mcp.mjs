@@ -20,7 +20,7 @@ async function readConnection() {
   return { origin: origin.origin, token: connection.token };
 }
 const server = new McpServer({ name: 'pencil-persistent-renderer', version: '0.6.0-experiment' });
-const resource = 'ui://pencil-remote/editor.html';
+const resource = 'ui://pencil-remote/editor-v2.html';
 let relay;
 const object = result => ({ content: [{ type: 'text', text: JSON.stringify(result) }], structuredContent: result });
 const wrap = fn => async args => {
@@ -42,7 +42,7 @@ server.registerResource('persistent-pen-view', resource, {}, async () => {
       const { build } = await import('esbuild');
       const built = await build({ entryPoints: [fileURLToPath(new URL('view.mjs', import.meta.url))], bundle: true, format: 'iife', platform: 'browser', write: false, minify: true });
       const html = await readFile(new URL('view.html', import.meta.url), 'utf8');
-      resourceHTML = html.replace('<script type="module" src="/view.mjs"></script>', `<script>window.pencilRemoteApp=true;${built.outputFiles[0].text.replace(/<\/script/gi, '<\\/script')}</script>`);
+      resourceHTML = html.replace('<script type="module" src="/view.mjs"></script>', () => `<script>window.pencilRemoteApp=true;${built.outputFiles[0].text.replace(/<\/script/gi, '<\\/script')}</script>`);
     }
   }
   return { contents: [{ uri: resource, mimeType: 'text/html;profile=mcp-app', text: resourceHTML, _meta: { ui: { csp: { connectDomains: [], frameDomains: [] } }, 'openai/ui': { availableDisplayModes: ['fullscreen'], preferredDisplayMode: 'fullscreen' } } }] };

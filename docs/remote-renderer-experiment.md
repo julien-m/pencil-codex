@@ -82,16 +82,21 @@ On 2026-11-15, the real hosted engine passed these checks:
 | No view for 310 seconds | The same renderer, with zero viewers before and after, accepts an agent change and saves the document after the wait. |
 | Interactive browser view | Pixel-derived click and ArrowRight move the actual node; agent color change appears in the image; view Save updates the source. |
 | Experimental MCP App transport | Actual JPEG reconstructed through app-only chunked relay; renderer identity matches the standalone view. |
+| Native Codex MCP App, 2026-11-17 | Connected editor pixels inspected through the exposed web MCP App surface; UI Save reports Document saved and source-saved. |
+| Native chat hide/return, 2026-11-17 | A unique text change made while another chat was displayed appears on return without reopening the document; same renderer identity and generation. The view remained attached while hidden. |
+| Two actual model agents, 2026-11-17 | Distinct participation leases, separate frames in one shared document, cross-agent readback and one final Save; zero viewers at every sampled before/during/after status. |
 | Access checks | Invalid admin credential, cross-session lease, reused document under another scope and another session's view grant are rejected. |
 | Build and complete tests | `bun run build`, `bun run test`, `bun run test:protocol` pass. |
 
 Independent review found a key-release identity bug when Shift was released before a letter. The view now retains each physical key's original value until release; a regression test checks that another view can subsequently send input.
 
-These clients are scripted test clients, not independent language-model agents. The broker's shared-session behavior is the same participation contract used by agents.
+The original transport probes use scripted clients. The 2026-11-17 orchestration additionally used two actual model agents in a dedicated test chat. Two test chats and a separate coordinator control document had distinct scopes/renderers; the agents' markers stayed out of the other documents. Native chat navigation used the dedicated platform tool; native application Computer Use was not used.
+
+The first native panel failed initialization. Its bundled SDK contains literal replacement sequences such as `$&`; inserting that bundle through a replacement string changed its bytes and broke JavaScript syntax. Version 0.1.2 uses a replacement callback, preserves closing-script escaping and serves `editor-v2.html`. Tests now parse emitted inline scripts from both source and installed resources. Existing MCP/resource caches can retain the old version until the host reloads that chat's connection.
 
 ## Remaining limits
 
-- Native MCP App rendering inside the current Codex host has not been observed. The tool transport and browser view were tested separately. A request to open the browser view in Codex returned `queued`, which does not prove that the panel rendered it.
+- Native MCP App rendering and the Save button were observed in the tested host. Native pointer/keyboard forwarding through the image was not retested there: the exposed web MCP App automation surface supported DOM interactions only. The earlier standalone browser interaction check remains separate evidence.
 - The remote image lacks a semantic accessibility tree. Clipboard integration, IME/composition, file dialogs, login popups and generation workflows have not been validated. Plain-text insertion is supported; native clipboard parity is not claimed.
 - The viewport is fixed at 1280×800. Latency, memory use with many sessions and bandwidth have not been benchmarked. No quality or frame-rate guarantee is made.
 - Browser/service crashes end the live document sessions; drafts remain subject to existing save/recovery rules. Automatic document-session restoration and eviction are not implemented. Localhost Supervisor can restart the service and start it at login; clients must reopen their document afterward.
