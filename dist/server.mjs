@@ -40407,7 +40407,15 @@ var UiRelay = class {
     });
     socket.on("message", (bytes) => {
       try {
-        const chunks = encodeMessage(JSON.parse(bytes.toString()));
+        const message = JSON.parse(bytes.toString());
+        if (message.kind === "session-closed") {
+          state.sessionClosed = true;
+          state.messages.length = 0;
+          state.bytes = 0;
+          state.waiting?.();
+          return;
+        }
+        const chunks = encodeMessage(message);
         const queuedBytes = chunks.reduce((sum, chunk) => sum + Buffer.byteLength(chunk.data), 0);
         if (state.bytes + queuedBytes > this.maxBytes) {
           this.close(connectionId);
@@ -40451,6 +40459,11 @@ var UiRelay = class {
     state.exchanges++;
     this.touch(connectionId, state);
     try {
+      if (state.sessionClosed) {
+        if (state.terminalDelivered) throw new Error("SESSION_CLOSED");
+        state.terminalDelivered = true;
+        return { messages: [], sessionClosed: true };
+      }
       this.send(connectionId, messages);
       if (!state.messages.length && !state.closed) await new Promise((resolve) => {
         const timer = setTimeout(resolve, this.pollTimeout);
@@ -40459,7 +40472,11 @@ var UiRelay = class {
           resolve();
         };
       });
-      if (state.closed) throw new Error("EDITOR_CHANNEL_CLOSED");
+      if (state.sessionClosed) {
+        state.terminalDelivered = true;
+        return { messages: [], sessionClosed: true };
+      }
+      if (state.closed && !state.messages.length) throw new Error("EDITOR_CHANNEL_CLOSED");
       const incoming = state.messages.splice(0, BRIDGE_BATCH_CHUNKS);
       state.bytes -= incoming.reduce((sum, chunk) => sum + Buffer.byteLength(chunk.data), 0);
       return { messages: incoming };
@@ -40470,6 +40487,7 @@ var UiRelay = class {
   }
   send(connectionId, chunks = []) {
     const state = this.connections.get(connectionId);
+    if (state?.sessionClosed) throw new Error("SESSION_CLOSED");
     if (!state || state.socket.readyState !== import_websocket.default.OPEN) throw new Error("EDITOR_CHANNEL_CLOSED");
     this.touch(connectionId, state);
     if (chunks.length) state.pushes++;

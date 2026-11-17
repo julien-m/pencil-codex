@@ -3856,7 +3856,7 @@ var Sessions = class {
   get(id) {
     return this.items.get(id) ?? fail("SESSION_NOT_FOUND", "Session inconnue");
   }
-  async open(filename, scope) {
+  async open(filename, scope, { explicit = false } = {}) {
     if (!path2.isAbsolute(filename) || path2.extname(filename).toLowerCase() !== ".pen") fail("INVALID_PATH", "Un fichier .pen absolu est requis");
     const file = await fs2.realpath(filename);
     if (path2.extname(file).toLowerCase() !== ".pen") fail("INVALID_PATH", "La cible r\xE9elle doit \xEAtre un document .pen");
@@ -3864,11 +3864,25 @@ var Sessions = class {
     if (!stat3.isFile() || stat3.size > 32 * 1024 * 1024) fail("INVALID_FILE", "Document invalide ou trop volumineux");
     const previous = [...this.items.values()].find((s2) => s2.file === file);
     if (previous) {
+      if (previous.closing) fail("SESSION_CLOSING", "Session is closing");
       if (previous.scope !== scope) fail("DOCUMENT_BUSY", "Ce document appartient d\xE9j\xE0 \xE0 une autre session ; cr\xE9er une copie pour une variante");
       return this.status(previous.id);
     }
     const id = randomUUID2();
     const draft = path2.join(this.draftRoot, `${digest(`${scope}:${file}`)}.pen`);
+    try {
+      await fs2.access(`${draft}.closed`);
+      if (!explicit) fail("SESSION_CLOSED", "An explicit document open is required after closing the session");
+      await fs2.unlink(`${draft}.closed`);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    const concurrent = [...this.items.values()].find((session) => session.file === file);
+    if (concurrent) {
+      if (concurrent.closing) fail("SESSION_CLOSING", "Session is closing");
+      if (concurrent.scope !== scope) fail("DOCUMENT_BUSY", "Document belongs to another session");
+      return this.status(concurrent.id);
+    }
     const s = { id, scope, file, draft, openedAt: Date.now(), editorReady: false, connectionWaiters: /* @__PURE__ */ new Set(), metadataCache: /* @__PURE__ */ new Map(), metadataStats: { requests: 0, hits: 0 }, recentCalls: [], exportJobs: /* @__PURE__ */ new Map(), mutationRevision: 0, virtualRoot: `pencil/${id}/`, generation: 0, pending: /* @__PURE__ */ new Map(), agents: /* @__PURE__ */ new Map(), blocked: false, connected: false, savedHash: null, operations: 0, saveState: "not-loaded" };
     this.items.set(id, s);
     return this.status(id);
@@ -3893,7 +3907,8 @@ var Sessions = class {
     return { generation: s.generation, fileURI: `file:///${s.virtualRoot}${encodeURIComponent(path2.basename(s.file))}` };
   }
   detach(id, generation) {
-    const s = this.get(id);
+    const s = this.items.get(id);
+    if (!s) return;
     if (generation !== s.generation) return;
     s.connected = false;
     s.editorReady = false;
@@ -3964,11 +3979,13 @@ var Sessions = class {
     return structuredClone(await cache.get(key));
   }
   schema(id) {
+    if (this.get(id).closing) fail("SESSION_CLOSING", "Session is closing");
     const deadline = Date.now() + this.editorWaitTimeout;
     return this.metadata(id, "schema", () => this.request(id, "get-mcp-schema", void 0, void 0, deadline), void 0, deadline);
   }
   acquire(id, agent) {
     const s = this.get(id);
+    if (s.closing) fail("SESSION_CLOSING", "Session is closing");
     if (s.blocked) fail("OUTCOME_UNKNOWN", "Session bloqu\xE9e apr\xE8s un r\xE9sultat inconnu");
     const token = randomUUID2();
     s.agents.set(token, { agent, pending: /* @__PURE__ */ new Set() });
@@ -3976,6 +3993,7 @@ var Sessions = class {
   }
   release(id, token) {
     const s = this.get(id), participant = s.agents.get(token);
+    if (s.closing) fail("SESSION_CLOSING", "Session is closing");
     if (!participant) fail("INVALID_LEASE", "Participation invalide");
     if (participant.pending.size || s.saving) fail("CALLS_IN_FLIGHT", "Des appels restent en cours");
     if (s.blocked) fail("OUTCOME_UNKNOWN", "Ne pas terminer une participation avec une op\xE9ration inconnue");
@@ -3984,6 +4002,7 @@ var Sessions = class {
   }
   call(id, token, name, args = {}, { observational = false } = {}) {
     const s = this.get(id), participant = s.agents.get(token);
+    if (s.closing) fail("SESSION_CLOSING", "Session is closing");
     if (!participant) fail("INVALID_LEASE", "Participation requise avant les appels");
     if (s.blocked) fail("OUTCOME_UNKNOWN", "Session bloqu\xE9e ; ne pas rejouer les mutations");
     if (!["execute", "read_skill", "get_style", "get_app_state"].includes(name)) fail("TOOL_NOT_ALLOWED", "Outil non expos\xE9 par ce plugin");
@@ -4123,8 +4142,9 @@ var Sessions = class {
       s.exportJobs.delete(prefix);
     }
   }
-  async save(id, token) {
+  async save(id, token, { forClose = false } = {}) {
     const s = this.get(id);
+    if (s.closing && !forClose) fail("SESSION_CLOSING", "Session is closing");
     if (s.saving) return this.afterSave(id, () => this.save(id, token));
     if (!s.agents.has(token) || s.pending.size || [...s.agents.values()].some((a) => a.pending.size) || s.blocked || s.saving) fail("SAVE_NOT_READY", "Rejoindre la session et attendre la fin des op\xE9rations");
     let finishSave, saveError;
@@ -4144,6 +4164,7 @@ var Sessions = class {
         } catch (error) {
           if (error.code !== "ENOENT") throw error;
           if (digest(await fs2.readFile(s.file)) !== s.savedHash) fail("SAVE_CONFLICT", "Le fichier a chang\xE9");
+          s.saveState = "source-saved";
           return { path: s.file, sessionId: id, unchanged: true };
         }
         try {
@@ -4168,12 +4189,40 @@ var Sessions = class {
   }
   async saveAs(id, token, filename) {
     const s = this.get(id);
+    if (s.closing) fail("SESSION_CLOSING", "Session is closing");
     if (s.saving) return this.afterSave(id, () => this.saveAs(id, token, filename));
     if (!s.agents.has(token) || s.pending.size || [...s.agents.values()].some((a) => a.pending.size) || s.blocked || s.saving) fail("SAVE_NOT_READY", "Rejoindre la session et attendre la fin des op\xE9rations");
     if (!["draft-saved", "source-saved", "conflict"].includes(s.saveState)) fail("SAVE_NOT_READY", "Attendre un acquittement de sauvegarde du moteur avant Enregistrer sous");
     if (path2.extname(filename).toLowerCase() !== ".pen") fail("INVALID_PATH", "Choisir un nouveau fichier .pen");
     const saved = await writeNewFile(filename, await fs2.readFile(s.draft));
     return { path: saved, sessionId: id, sourceUnchanged: true };
+  }
+  /** Save and dispose one exclusively held session; a failed Save retains its editor. */
+  async finish(id, token, lifecycle) {
+    const s = this.get(id);
+    if (!s.agents.has(token)) fail("INVALID_LEASE", "Participation required");
+    if (!lifecycle) fail("CLOSE_UNSUPPORTED", "Editor lifecycle is unavailable");
+    if (s.agents.size !== 1 || s.pending.size || [...s.agents.values()].some((a) => a.pending.size) || s.saving || s.closing || s.blocked) fail("CLOSE_NOT_READY", "Other participants or operations still use this session");
+    s.closing = true;
+    let committed = false;
+    try {
+      await lifecycle.prepare(id);
+      const saved = await this.save(id, token, { forClose: true });
+      await fs2.mkdir(this.draftRoot, { recursive: true, mode: 448 });
+      await this.atomicWrite(`${s.draft}.closed`, Buffer.from("closed"));
+      committed = true;
+      await lifecycle.dispose(id);
+      s.agents.clear();
+      this.items.delete(id);
+      return { sessionId: id, path: s.file, closed: true, saved, rendererReleased: true };
+    } catch (error) {
+      if (committed) s.blocked = true;
+      else {
+        s.closing = false;
+        await lifecycle.resume(id);
+      }
+      throw error;
+    }
   }
   persist(s, operation) {
     const result = (s.persistenceTail ?? Promise.resolve()).then(operation);
@@ -4289,7 +4338,7 @@ var same = (a, b) => {
   const left = Buffer.from(a), right = Buffer.from(b);
   return left.length === right.length && timingSafeEqual(left, right);
 };
-async function startBroker({ token = randomUUID3(), timeout, editorWaitTimeout: editorWaitTimeout2, draftRoot } = {}) {
+async function startBroker({ token = randomUUID3(), timeout, editorWaitTimeout: editorWaitTimeout2, draftRoot, editorLifecycle } = {}) {
   const sessions = new Sessions({ timeout, editorWaitTimeout: editorWaitTimeout2, draftRoot }), views = /* @__PURE__ */ new Map();
   const server = http.createServer(async (req, res) => {
     res.setHeader("Content-Type", "application/json");
@@ -4312,7 +4361,7 @@ async function startBroker({ token = randomUUID3(), timeout, editorWaitTimeout: 
       if (method === "ping") result = { version: "0.5.1", editorWaitTimeout: sessions.editorWaitTimeout, rpcTimeoutMs: sessions.editorWaitTimeout + sessions.timeout + sessions.saveWaitTimeout + 2e3 };
       else if (method === "open" || method === "new") {
         const filename = method === "new" ? await createDocument(args.path) : args.path;
-        result = await sessions.open(filename, args.scope);
+        result = await sessions.open(filename, args.scope, { explicit: args.intent === "explicit" });
         if (!views.has(result.sessionId)) views.set(result.sessionId, randomUUID3());
         result = { ...result, editorToken: views.get(result.sessionId) };
       } else if (method === "schema") result = await sessions.schema(args.sessionId);
@@ -4330,7 +4379,10 @@ async function startBroker({ token = randomUUID3(), timeout, editorWaitTimeout: 
         result = await sessions.save(args.sessionId, args.lease);
         broadcast(args.sessionId);
       } else if (method === "save-as") result = await sessions.saveAs(args.sessionId, args.lease, args.path);
-      else throw new Error("Unknown broker method");
+      else if (method === "close") {
+        result = await sessions.finish(args.sessionId, args.lease, editorLifecycle);
+        views.delete(args.sessionId);
+      } else throw new Error("Unknown broker method");
       res.end(JSON.stringify({ result }));
     } catch (e) {
       res.end(JSON.stringify({ error: { code: e.code ?? "BROKER_ERROR", message: e.message } }));
@@ -4338,6 +4390,7 @@ async function startBroker({ token = randomUUID3(), timeout, editorWaitTimeout: 
   });
   const ws = new import_websocket_server.default({ noServer: true, maxPayload: 40 * 1024 * 1024 });
   const broadcast = (id) => {
+    if (!sessions.items.has(id)) return;
     for (const peer of ws.clients) if (peer.sessionId === id && peer.readyState === 1) peer.send(JSON.stringify({ kind: "activity", status: sessions.status(id) }));
   };
   sessions.onActivity = broadcast;

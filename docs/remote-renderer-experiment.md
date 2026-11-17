@@ -84,6 +84,8 @@ On 2026-11-15, the real hosted engine passed these checks:
 | Experimental MCP App transport | Actual JPEG reconstructed through app-only chunked relay; renderer identity matches the standalone view. |
 | Native Codex MCP App, 2026-11-17 | Connected editor pixels inspected through the exposed web MCP App surface; UI Save reports Document saved and source-saved. |
 | Native chat hide/return, 2026-11-17 | A unique text change made while another chat was displayed appears on return without reopening the document; same renderer identity and generation. The view remained attached while hidden. |
+| Native engine restart with 0.1.3, 2026-11-17 | A fresh Codex chat loaded the v3 resource. Its existing native view recovered a new session and renderer after a real supervised service restart, without open/new/reload or restarting Codex. Engine nodes/variables matched the baseline, the UUID remained visible, and UI Save reported Document saved plus source-saved. Recovery latency was not directly measured. |
+| Native panel reopen with 0.1.3, 2026-11-17 | After the user reported closing the panel, one explicit open preserved session, renderer, generation, all nodes/variables and source-saved after UI Save. The host still listed one app/viewer before reopening, and final capture plus handle recovery timed out. Complete panel/transport teardown and fresh pixels for this phase remain unverified. |
 | Two actual model agents, 2026-11-17 | Distinct participation leases, separate frames in one shared document, cross-agent readback and one final Save; zero viewers at every sampled before/during/after status. |
 | Access checks | Invalid admin credential, cross-session lease, reused document under another scope and another session's view grant are rejected. |
 | Build and complete tests | `bun run build`, `bun run test`, `bun run test:protocol` pass. |
@@ -94,12 +96,30 @@ The original transport probes use scripted clients. The 2026-11-17 orchestration
 
 The first native panel failed initialization. Its bundled SDK contains literal replacement sequences such as `$&`; inserting that bundle through a replacement string changed its bytes and broke JavaScript syntax. Version 0.1.2 uses a replacement callback, preserves closing-script escaping and serves `editor-v2.html`. Tests now parse emitted inline scripts from both source and installed resources. Existing MCP/resource caches can retain the old version until the host reloads that chat's connection.
 
+## Native view recovery
+
+Version 0.1.3 serves `editor-v3.html`. The MCP process retains one opaque recovery grant per canonical document path and scope that it has already opened. The app-only bridge accepts that grant, never a browser-supplied path, to reopen the same document after an engine restart. Concurrent recoveries for that document share one reopen operation. The grants live only as long as their MCP process; stopping that process requires an explicit document open again.
+
+The view makes at most three recovery attempts, spaced one second apart, with each host request bounded to ten seconds. Receiving a replacement frame resets this outage budget. Exhaustion leaves an unavailable status; another explicit open can retry. Recovery discards queued input and Save chunks, clears incomplete frame decoding, closes the old channel and ignores late replies from it. It never repeats an uncertain mutation. New open results replace the old channel even when the host reuses the same MCP App instance. Save stays disabled until a current frame is decoded.
+
+The fresh native test also exposed an unchanged-Save status defect: after a read-only execute, an engine-confirmed flush without a draft returned success but left `check-required`. The broker now sets `source-saved` after verifying that the original still matches its recorded digest. The no-draft path retains its source conflict rejection. Closing a side panel may leave its inline MCP App and viewer attached; panel closure alone does not prove complete transport teardown.
+
+Read [the view lifecycle regression](../tests/remote-view.test.mjs), [the transport recovery checks](../tests/ui-relay.test.mjs) and [the scoped grant checks](../tests/view-recovery.test.mjs) for executable contracts. Their fake host/DOM boundaries prove lifecycle behavior; native Codex acceptance still requires observing the installed resource after a real service restart.
+
 ## Remaining limits
 
 - Native MCP App rendering and the Save button were observed in the tested host. Native pointer/keyboard forwarding through the image was not retested there: the exposed web MCP App automation surface supported DOM interactions only. The earlier standalone browser interaction check remains separate evidence.
 - The remote image lacks a semantic accessibility tree. Clipboard integration, IME/composition, file dialogs, login popups and generation workflows have not been validated. Plain-text insertion is supported; native clipboard parity is not claimed.
 - The viewport is fixed at 1280×800. Latency, memory use with many sessions and bandwidth have not been benchmarked. No quality or frame-rate guarantee is made.
-- Browser/service crashes end the live document sessions; drafts remain subject to existing save/recovery rules. Automatic document-session restoration and eviction are not implemented. Localhost Supervisor can restart the service and start it at login; clients must reopen their document afterward.
+- Browser/service crashes end the old live sessions and participation leases; drafts remain subject to existing save/recovery rules. A connected 0.1.3 native view can reopen its granted document into a new session/renderer through its surviving MCP process. Global session restoration, recovery after that MCP process terminates, and eviction are not implemented. Localhost Supervisor can restart the service and start it at login.
 - The hosted Pen engine still requires network access. The prototype does not redistribute it or provide offline execution.
 
 Modern Web Guidance guides `drag` and `validate-origins` were applied: pointer capture preserves release events, and the iframe bridge checks the exact sender and normalized origin.
+
+## Explicit session completion
+
+Version 0.1.5 exposes `pencil_close({sessionId, lease})`. Use it when the document task is finished; success consumes the final lease. It freezes admissions and view input, confirms Save, persists a closure marker, then releases only that renderer context, cached frame and viewers. Another participant, pending operation, uncertain state or failed Save prevents disposal. A disposal failure keeps the session quarantined rather than claiming success.
+
+The private draft directory retains a `.closed` sidecar per document/scope. Automatic recovery and older implicit open calls cannot remove that marker, including after service restart. Only a new explicit open can resume the saved document. The MCP adapter also revokes the old recovery grant. The view treats the terminal closure message as intentional and stops its transport. `pencil_end` remains a participation release, preserving background work.
+
+Read [the closure and conflict tests](../tests/artifacts.test.mjs), [the terminal transport tests](../tests/ui-relay.test.mjs) and [the context disposal test](../tests/remote-input.test.mjs) for the lifecycle guarantees.

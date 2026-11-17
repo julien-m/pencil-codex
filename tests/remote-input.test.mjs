@@ -67,3 +67,15 @@ test('an image acknowledgement arriving before attachment is retained', async ()
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(acknowledgements, [frameId]);
 });
+test('closing one renderer context releases its cached frame and viewers without closing the shared browser', async () => {
+  const { RendererHost } = await import('../experiments/remote-engine/renderer.mjs');
+  const host = new RendererHost({}); let contextClosed = false, viewerClosed = false;
+  const first = crypto.randomUUID(), other = crypto.randomUUID();
+  const state = { pendingInputs: 0, keys: new Set(), buttons: new Set(), inputTail: Promise.resolve(), frame: { data: 'cached' }, context: { async close() { contextClosed = true; } }, viewers: new Set([{ socket: { readyState: 1, send(data, done) { assert.equal(JSON.parse(data).kind, 'session-closed'); done(); }, close() { viewerClosed = true; } } }]) };
+  host.sessions.set(first, Promise.resolve(state)); host.sessions.set(other, Promise.resolve({}));
+  host.browserPromise = Promise.resolve({ close() { assert.fail('Shared browser must remain open'); } });
+  state.keys.add('Shift'); await assert.rejects(host.prepareClose(first), /RENDERER_BUSY/); state.keys.clear();
+  await host.prepareClose(first); await host.closeSession(first);
+  assert(contextClosed && viewerClosed); assert.equal(state.frame, null); assert.equal(state.viewers.size, 0);
+  assert(!host.sessions.has(first)); assert(host.sessions.has(other));
+});

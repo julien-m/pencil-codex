@@ -16,7 +16,9 @@ const assets = new Map([['/', ['view.html', 'text/html']], ['/engine', ['engine.
 export async function startRemoteExperiment({ port, executablePath, runtimeDirectory }) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('A valid explicit loopback port is required');
   await mkdir(runtimeDirectory, { recursive: true, mode: 0o700 });
-  const broker = await startBroker({ draftRoot: path.join(runtimeDirectory, 'drafts') });
+  const broker = await startBroker({ draftRoot: path.join(runtimeDirectory, 'drafts'), editorLifecycle: {
+    prepare: id => renderer.prepareClose(id), resume: id => renderer.resume(id), dispose: id => renderer.closeSession(id),
+  } });
   const token = randomUUID(), grants = new Map(), origin = `http://127.0.0.1:${port}`;
   const renderer = new RendererHost({ executablePath, origin, brokerPort: broker.port });
   const rpc = async (method, args = {}) => {
@@ -39,6 +41,9 @@ export async function startRemoteExperiment({ port, executablePath, runtimeDirec
         res.setHeader('Content-Security-Policy', `default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src data:; connect-src ${connect}; frame-src https://app.pen.dev; base-uri 'none'; form-action 'none'`);
         res.end(await readFile(path.join(root, file))); return;
       }
+      if (req.method === 'GET' && url.pathname === '/view-messages.mjs') {
+        res.setHeader('Content-Type', 'text/javascript'); res.end(await readFile(path.join(root, 'view-messages.mjs'))); return;
+      }
       if (req.method !== 'POST' || url.pathname !== '/rpc') return json(res, 404, { error: 'Not found' });
       if (!same(req.headers.authorization, `Bearer ${token}`)) return json(res, 401, { error: 'Authentication required' });
       let raw = '';
@@ -52,6 +57,7 @@ export async function startRemoteExperiment({ port, executablePath, runtimeDirec
         const fragment = new URLSearchParams({ session: session.sessionId, token: grants.get(session.sessionId) });
         result = { ...session, renderer: await renderer.status(session.sessionId), viewURL: `${origin}/#${fragment}` };
       } else if (method === 'status') result = { ...result, renderer: await renderer.status(args.sessionId) };
+      else if (method === 'close') grants.delete(args.sessionId);
       json(res, 200, { result });
     } catch (error) { json(res, 400, { error: { code: error.code ?? 'EXPERIMENT_ERROR', message: error.message } }); }
   });

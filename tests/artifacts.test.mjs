@@ -2,6 +2,7 @@ import { test, expect, beforeEach, afterEach } from 'bun:test';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { createDocument, writeNewFile } from '../src/artifacts.mjs';
 import { Sessions } from '../src/sessions.mjs';
 let directory;
@@ -34,6 +35,44 @@ test('exclusive file write does not replace a pre-existing destination', async (
   await expect(writeNewFile(target, Buffer.from('replacement'))).rejects.toMatchObject({ code: 'EEXIST' });
   expect(await fs.readFile(target, 'utf8')).toBe('original');
 });
+test('finish saves one session, consumes its lease, and persists intentional closure until an explicit reopen', async () => {
+  const file = path.join(directory, `${randomUUID()}.pen`), content = randomUUID(), scope = randomUUID();
+  await fs.writeFile(file, content);
+  const options = { draftRoot: path.join(directory, 'drafts') }, sessions = new Sessions(options);
+  const { sessionId } = await sessions.open(file, scope);
+  let generation;
+  ({ generation } = sessions.attach(sessionId, message => sessions.reply(sessionId, generation, { id: message.id, payload: 1 })));
+  await sessions.storage(sessionId, generation, 'storage-load');
+  const { lease } = sessions.acquire(sessionId, 'owner');
+  const other = sessions.acquire(sessionId, 'other'); let disposed = 0;
+  const lifecycle = { prepare: async () => {}, resume: async () => {}, dispose: async () => { disposed++; } };
+  await expect(sessions.finish(sessionId, lease, lifecycle)).rejects.toMatchObject({ code: 'CLOSE_NOT_READY' });
+  expect(disposed).toBe(0); sessions.release(sessionId, other.lease);
+  await expect(sessions.finish(sessionId, randomUUID(), lifecycle)).rejects.toMatchObject({ code: 'INVALID_LEASE' });
+  expect((await sessions.finish(sessionId, lease, lifecycle)).closed).toBe(true);
+  expect(disposed).toBe(1); expect(sessions.items.has(sessionId)).toBe(false);
+  expect(await fs.readFile(file, 'utf8')).toBe(content);
+  const restarted = new Sessions(options);
+  await expect(restarted.open(file, scope)).rejects.toMatchObject({ code: 'SESSION_CLOSED' });
+  const reopened = await Promise.all([restarted.open(file, scope, { explicit: true }), restarted.open(file, scope, { explicit: true })]);
+  expect(reopened[0].sessionId).not.toBe(sessionId);
+  expect(reopened[1].sessionId).toBe(reopened[0].sessionId); expect(restarted.items.size).toBe(1);
+});
+test('finish freezes admissions while saving and restores availability if Save conflicts', async () => {
+  const file = path.join(directory, `${randomUUID()}.pen`); await fs.writeFile(file, randomUUID());
+  const sessions = new Sessions({ draftRoot: path.join(directory, 'drafts') });
+  const { sessionId } = await sessions.open(file, randomUUID()); let generation;
+  ({ generation } = sessions.attach(sessionId, message => sessions.reply(sessionId, generation, { id: message.id, payload: 1 })));
+  await sessions.storage(sessionId, generation, 'storage-load');
+  const { lease } = sessions.acquire(sessionId, 'owner'); const gate = Promise.withResolvers(); let resumed = false, disposed = false;
+  const finishing = sessions.finish(sessionId, lease, { prepare: () => gate.promise, resume: async () => { resumed = true; }, dispose: async () => { disposed = true; } });
+  expect(() => sessions.acquire(sessionId, 'late')).toThrow('Session is closing');
+  expect(() => sessions.call(sessionId, lease, 'execute', {})).toThrow('Session is closing');
+  await fs.writeFile(file, randomUUID()); gate.resolve();
+  await expect(finishing).rejects.toMatchObject({ code: 'SAVE_CONFLICT' });
+  expect(resumed).toBe(true); expect(disposed).toBe(false); expect(sessions.items.has(sessionId)).toBe(true);
+  expect(sessions.get(sessionId).closing).toBe(false);
+});
 test('Save flushes the engine, updates the opened file and keeps its previous bytes', async () => {
   const file = path.join(directory, 'edit.pen'); await fs.writeFile(file, 'original');
   const sessions = new Sessions({ draftRoot: path.join(directory, 'drafts') });
@@ -59,6 +98,29 @@ test('Save flushes the engine, updates the opened file and keeps its previous by
   const channel = reopened.attach(other.sessionId, () => {});
   expect((await reopened.storage(other.sessionId, channel.generation, 'storage-load')).content).toBe('next-edit');
   expect(reopened.status(other.sessionId).saveState).toBe('draft-saved');
+});
+test('an unchanged Save confirms the source state without creating a draft and still rejects source conflicts', async () => {
+  const file = path.join(directory, `${randomUUID()}.pen`), original = randomUUID();
+  await fs.writeFile(file, original);
+  const sessions = new Sessions({ draftRoot: path.join(directory, 'drafts') });
+  const { sessionId } = await sessions.open(file, randomUUID());
+  let generation;
+  ({ generation } = sessions.attach(sessionId, message => sessions.reply(sessionId, generation, {
+    id: message.id, payload: message.method === 'save' ? 1 : { content: [] },
+  })));
+  await sessions.storage(sessionId, generation, 'storage-load');
+  const { lease } = sessions.acquire(sessionId, 'reader');
+  await sessions.call(sessionId, lease, 'execute', { input: 'Print(GetVariables())' });
+  expect(sessions.status(sessionId).saveState).toBe('check-required');
+  expect((await sessions.save(sessionId, lease)).unchanged).toBe(true);
+  expect(sessions.status(sessionId).saveState).toBe('source-saved');
+  expect(await fs.readFile(file, 'utf8')).toBe(original);
+  await expect(fs.stat(sessions.get(sessionId).draft)).rejects.toMatchObject({ code: 'ENOENT' });
+  await sessions.call(sessionId, lease, 'execute', { input: 'Print(GetVariables())' });
+  const external = randomUUID(); await fs.writeFile(file, external);
+  await expect(sessions.save(sessionId, lease)).rejects.toMatchObject({ code: 'SAVE_CONFLICT' });
+  expect(sessions.status(sessionId).saveState).not.toBe('source-saved');
+  expect(await fs.readFile(file, 'utf8')).toBe(external);
 });
 test('external changes survive reload and the newest conflicted draft can be saved separately', async () => {
   const file = path.join(directory, 'conflict.pen'); await fs.writeFile(file, 'original');

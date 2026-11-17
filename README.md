@@ -10,6 +10,8 @@ Open [the editable demo](examples/login-demo.pen) to inspect both screens. These
 
 A Codex plugin that opens `.pen` design documents in an embedded Pencil editor, without adding another chat interface. A local Node.js service maintains one channel per design session. Multiple agents share a `sessionId` and can submit operations concurrently. Exclusivity applies between design sessions, not between agents within one session.
 
+Pen Remote 0.1.5 adds `pencil_close`: finish with your sole remaining lease to save and release that session's views and editor. The shared browser/service and other documents remain available. Closing the panel or calling `pencil_end` alone keeps the editor alive. Explicitly open the document again to resume.
+
 ## Repository and platform
 
 This repository, **pencil-codex**, contains one independently installable Codex plugin. Its display name is **Pencil**, and its plugin identifier is `pencil`. A future Claude-specific implementation would live in a separate `pencil-claude` repository; that implementation is not included here.
@@ -23,6 +25,8 @@ The experimental `feat/persistent-session-engine` branch now includes a persiste
 The branch can also build a separate **Pen Remote** local plugin with a precompiled MCP App resource. Its adapter requires an explicit chat scope; it never treats a global MCP process as the current chat. Read [the local installation steps](docs/remote-renderer-experiment.md#separate-local-codex-plugin) before testing it. Native MCP App rendering, background edits after changing chats, returning to the same renderer and saving through the native view were verified on 2026-11-17. Two actual model agents also edited one shared document with no viewer attached; the other chat documents remained isolated.
 
 Pen Remote 0.1.1 exposes its MCP tools while the engine is offline and reads the current supervised connection on each engine call. An absent connection file no longer terminates tool discovery. Keep the supervised service persistent when using the installed experimental plugin across app restarts.
+
+Pen Remote 0.1.3 adds bounded view recovery after a supervised engine restart. The MCP process retains an opaque grant for the previously opened document and scope; the view can reopen that document and attach to its new renderer without replaying pointer, keyboard or Save messages. A new open result also replaces an obsolete view channel. Recovery does not restore participation leases or survive termination of the MCP process itself. Read [the recovery contract and validation limits](docs/remote-renderer-experiment.md#native-view-recovery).
 
 Pen Remote 0.1.2 fixes a script assembly error that made the native panel time out. Bundled JavaScript is inserted literally, and the MCP App resource has a new versioned URI. Existing chats may retain their previous MCP process/resource until the host reloads it; installing the new package does not update every already-open panel.
 

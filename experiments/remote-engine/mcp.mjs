@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { UiRelay } from '../../src/ui-relay.mjs';
 import { BRIDGE_BATCH_CHUNKS } from '../../shared/bridge-wire.mjs';
+import { ViewRecovery } from './view-recovery.mjs';
 
 const connectionPath = process.env.PENCIL_REMOTE_CONNECTION ?? fileURLToPath(new URL('../../.runtime/remote-engine/connection.json', import.meta.url));
 async function readConnection() {
@@ -20,7 +21,7 @@ async function readConnection() {
   return { origin: origin.origin, token: connection.token };
 }
 const server = new McpServer({ name: 'pencil-persistent-renderer', version: '0.6.0-experiment' });
-const resource = 'ui://pencil-remote/editor-v2.html';
+const resource = 'ui://pencil-remote/editor-v5.html';
 let relay;
 const object = result => ({ content: [{ type: 'text', text: JSON.stringify(result) }], structuredContent: result });
 const wrap = fn => async args => {
@@ -33,6 +34,8 @@ async function rpc(method, args) {
   if (body.error) throw new Error(typeof body.error === 'string' ? body.error : body.error.message);
   return body.result;
 }
+const editorGrant = result => ({ sessionId: result.sessionId, editorToken: new URLSearchParams(new URL(result.viewURL).hash.slice(1)).get('token') });
+const viewRecovery = new ViewRecovery(async document => editorGrant(await rpc('open', document)));
 let resourceHTML;
 server.registerResource('persistent-pen-view', resource, {}, async () => {
   if (!resourceHTML) {
@@ -51,12 +54,13 @@ for (const [name, method] of [['pencil_open', 'open'], ['pencil_new', 'new']]) s
   description: 'Open this chat’s persistent renderer. Pass the current chat ID as scope, or a unique scope allocated once for this chat. Reuse its returned sessionId for collaborating agents. A global MCP process is never used as a chat identity. Other chats must use distinct scopes and documents.',
   inputSchema: { path: z.string().min(1), scope: z.string().min(1).max(200) }, _meta: { ui: { resourceUri: resource } },
 }, wrap(async args => {
-  const { viewURL, ...session } = await rpc(method, args);
-  const grant = new URLSearchParams(new URL(viewURL).hash.slice(1));
-  return { ...object(session), _meta: { editor: { sessionId: session.sessionId, editorToken: grant.get('token') } } };
+  const result = await rpc(method, { ...args, intent: 'explicit' });
+  const { viewURL, ...session } = result;
+  return { ...object(session), _meta: { editor: await viewRecovery.remember(args, editorGrant(result)) } };
 }));
 const id = z.string().uuid(), member = { sessionId: id, lease: id };
 const definitions = [
+  ['pencil_close', 'close', member],
   ['pencil_begin', 'acquire', { sessionId: id, agent: z.string().min(1).max(200) }],
   ['pencil_end', 'release', member], ['pencil_status', 'status', { sessionId: id }], ['pencil_tools', 'schema', { sessionId: id }], ['pencil_save', 'save', member],
   ['pencil_call', 'call', { ...member, tool: z.enum(['execute', 'get_app_state', 'get_style', 'read_skill']), arguments: z.record(z.string(), z.unknown()).default({}) }],
@@ -64,15 +68,17 @@ const definitions = [
   ['pencil_capture', 'capture', { ...member, nodeIds: z.array(z.string()).min(1).max(20), directory: z.string().min(1) }],
   ['pencil_export', 'export', { ...member, nodeIds: z.array(z.string()).min(1).max(20), directory: z.string().min(1), format: z.enum(['png', 'jpeg', 'webp', 'pdf', 'html-css', 'html-tailwind']) }],
 ];
-for (const [name, method, inputSchema] of definitions) server.registerTool(name, { description: `Persistent session ${method}. Keep the returned sessionId and one participation lease per agent; never send another chat’s document URI.`, inputSchema }, wrap(async args => {
+for (const [name, method, inputSchema] of definitions) server.registerTool(name, { description: name === 'pencil_close' ? 'Finish this session: save, close its views and release its editor context, retaining the shared service. Requires your sole remaining lease and no pending operation. Success consumes the lease; do not call pencil_end afterward. Other sessions stay active. Reopen explicitly when needed.' : `Persistent session ${method}. Keep the returned sessionId and one participation lease per agent; never send another chat’s document URI.`, inputSchema }, wrap(async args => {
   const result = await rpc(method, args);
+  if (method === 'close') viewRecovery.invalidate(args.sessionId);
   return ['call', 'capture', 'export'].includes(method) ? result : object(result);
 }));
 server.registerTool('pencil_editor_bridge', {
   description: 'Internal remote-view transport; this view does not create an editor engine.',
-  inputSchema: { action: z.enum(['connect', 'exchange', 'send', 'close']), sessionId: id.optional(), editorToken: id.optional(), connectionId: id.optional(), messages: z.array(z.record(z.string(), z.unknown())).max(BRIDGE_BATCH_CHUNKS).optional() },
+  inputSchema: { action: z.enum(['connect', 'exchange', 'send', 'close', 'recover']), sessionId: id.optional(), editorToken: id.optional(), recoveryToken: id.optional(), connectionId: id.optional(), messages: z.array(z.record(z.string(), z.unknown())).max(BRIDGE_BATCH_CHUNKS).optional() },
   _meta: { ui: { visibility: ['app'] } },
 }, wrap(async args => {
+  if (args.action === 'recover') return object(await viewRecovery.recover(args.recoveryToken));
   if (args.action === 'connect') {
     if (!args.sessionId || !args.editorToken) throw new Error('A view grant is required');
     const connection = await readConnection();

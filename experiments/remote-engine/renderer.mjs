@@ -55,6 +55,7 @@ export class RendererHost {
   async watch(sessionId, socket) {
     const state = await this.sessions.get(sessionId);
     if (!state) throw new Error('Renderer not found');
+    if (state.closing) throw new Error('SESSION_CLOSING');
     const viewer = { id: randomUUID(), socket, pendingFrame: 0, lastFrame: 0, closed: false };
     state.viewers.add(viewer);
     if (!state.streaming) {
@@ -85,6 +86,7 @@ export class RendererHost {
     const input = inputSchema.parse(value);
     const state = await this.sessions.get(sessionId);
     if (!state) throw new Error('Renderer not found');
+    if (state.closing) throw new Error('SESSION_CLOSING');
     if (state.pendingInputs >= 100) throw new Error('Input queue full');
     state.pendingInputs++;
     const run = state.inputTail.then(async () => {
@@ -128,5 +130,34 @@ export class RendererHost {
     const browser = await this.browserPromise;
     await browser?.close();
     this.sessions.clear();
+  }
+  /** Freeze input before Save; do not interrupt pending interactions. */
+  async prepareClose(sessionId) {
+    const state = await this.sessions.get(sessionId);
+    if (!state || state.pendingInputs || state.keys.size || state.buttons.size) throw new Error('RENDERER_BUSY');
+    state.closing = true; await state.inputTail;
+  }
+  async resume(sessionId) {
+    const state = await this.sessions.get(sessionId);
+    if (state) state.closing = false;
+  }
+  /** Release one context and its viewers, retaining the shared browser and other contexts. */
+  async closeSession(sessionId) {
+    const state = await this.sessions.get(sessionId);
+    if (!state) throw new Error('Renderer not found');
+    for (const viewer of state.viewers) {
+      const socket = viewer.socket;
+      // A stale viewer must not prevent disposal of its editor.
+      try {
+        if (socket.readyState === 1) socket.send(JSON.stringify({ kind: 'session-closed' }), () => socket.close());
+        else socket.terminate();
+      } catch { socket.terminate(); }
+    }
+    let timer;
+    try {
+      // An uncertain close must never kill the shared browser or another document.
+      await Promise.race([state.context.close(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('EDITOR_CLOSE_TIMEOUT')), 10_000); })]);
+    } finally { clearTimeout(timer); }
+    state.viewers.clear(); state.frame = null; this.sessions.delete(sessionId);
   }
 }

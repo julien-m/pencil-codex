@@ -9,7 +9,7 @@ const same = (a, b) => {
   const left = Buffer.from(a), right = Buffer.from(b);
   return left.length === right.length && timingSafeEqual(left, right);
 };
-export async function startBroker({ token = randomUUID(), timeout, editorWaitTimeout, draftRoot } = {}) {
+export async function startBroker({ token = randomUUID(), timeout, editorWaitTimeout, draftRoot, editorLifecycle } = {}) {
   const sessions = new Sessions({ timeout, editorWaitTimeout, draftRoot }), views = new Map();
   const server = http.createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
@@ -23,7 +23,7 @@ export async function startBroker({ token = randomUUID(), timeout, editorWaitTim
       if (method === 'ping') result = { version: '0.5.1', editorWaitTimeout: sessions.editorWaitTimeout, rpcTimeoutMs: sessions.editorWaitTimeout + sessions.timeout + sessions.saveWaitTimeout + 2000 };
       else if (method === 'open' || method === 'new') {
         const filename = method === 'new' ? await createDocument(args.path) : args.path;
-        result = await sessions.open(filename, args.scope);
+        result = await sessions.open(filename, args.scope, { explicit: args.intent === 'explicit' });
         if (!views.has(result.sessionId)) views.set(result.sessionId, randomUUID());
         result = { ...result, editorToken: views.get(result.sessionId) };
       } else if (method === 'schema') result = await sessions.schema(args.sessionId);
@@ -35,12 +35,13 @@ export async function startBroker({ token = randomUUID(), timeout, editorWaitTim
       else if (method === 'export') result = await sessions.exportNodes(args.sessionId, args.lease, args.nodeIds, args.format, args.directory);
       else if (method === 'save') { result = await sessions.save(args.sessionId, args.lease); broadcast(args.sessionId); }
       else if (method === 'save-as') result = await sessions.saveAs(args.sessionId, args.lease, args.path);
+      else if (method === 'close') { result = await sessions.finish(args.sessionId, args.lease, editorLifecycle); views.delete(args.sessionId); }
       else throw new Error('Unknown broker method');
       res.end(JSON.stringify({ result }));
     } catch (e) { res.end(JSON.stringify({ error: { code: e.code ?? 'BROKER_ERROR', message: e.message } })); }
   });
   const ws = new WebSocketServer({ noServer: true, maxPayload: 40 * 1024 * 1024 });
-  const broadcast = id => { for (const peer of ws.clients) if (peer.sessionId === id && peer.readyState === 1) peer.send(JSON.stringify({ kind: 'activity', status: sessions.status(id) })); };
+  const broadcast = id => { if (!sessions.items.has(id)) return; for (const peer of ws.clients) if (peer.sessionId === id && peer.readyState === 1) peer.send(JSON.stringify({ kind: 'activity', status: sessions.status(id) })); };
   sessions.onActivity = broadcast;
   server.on('upgrade', (req, socket, head) => {
     let url;

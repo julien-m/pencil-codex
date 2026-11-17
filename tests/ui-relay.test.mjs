@@ -7,6 +7,9 @@ import { startBroker } from '../src/broker.mjs';
 import { UiRelay } from '../src/ui-relay.mjs';
 import { WebSocketServer } from 'ws';
 import { createMcpTransport } from '../web/mcp-transport.mjs';
+import { encodeMessage, MessageDecoder, BRIDGE_CHUNK_CHARS, BRIDGE_BATCH_CHUNKS } from '../shared/bridge-wire.mjs';
+import { randomUUID } from 'node:crypto';
+import { setImmediate } from 'node:timers/promises';
 
 test('native MCP transport routes concurrent agents, storage and Save through the existing broker', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'pencil-relay-'));
@@ -104,6 +107,144 @@ test('host bridge errors stop the web transport without replaying messages', asy
   await failed; await transport.close();
   assert.equal(calls.filter(action => action === 'exchange').length, 1);
   assert.equal(transport.readyState, 3);
+});
+test('intentional session closure is terminal and never triggers recovery', async () => {
+  const ended = Promise.withResolvers(); let recovered = false;
+  const transport = createMcpTransport({ async callServerTool({ arguments: args }) {
+    if (args.action === 'connect') return { structuredContent: { connectionId: randomUUID() } };
+    if (args.action === 'exchange') return { structuredContent: { messages: encodeMessage({ kind: 'session-closed' }) } };
+    return { structuredContent: { closed: true } };
+  } }, { sessionId: randomUUID(), editorToken: randomUUID() }, {
+    onmessage: ({ data }) => ended.resolve(JSON.parse(data)), onerror: ended.reject, onclose() {},
+    recovery: { attempts: 3, delayMs: 0, reopen: async () => { recovered = true; throw new Error('must not recover'); } },
+  });
+  assert.equal((await ended.promise).kind, 'session-closed');
+  assert.equal(transport.readyState, 3); assert.equal(recovered, false);
+});
+test('terminal control survives socket EOF and supersedes a partially drained image', async () => {
+  const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+  await new Promise(resolve => server.once('listening', resolve));
+  const connected = Promise.withResolvers(); server.once('connection', connected.resolve);
+  const relay = new UiRelay({ pollTimeout: 5 });
+  try {
+    const { connectionId } = await relay.connect({ port: server.address().port, sessionId: randomUUID(), editorToken: randomUUID() });
+    const peer = await connected.promise;
+    peer.send(JSON.stringify({ kind: 'frame', data: 'x'.repeat(BRIDGE_CHUNK_CHARS * (BRIDGE_BATCH_CHUNKS + 1)) }));
+    assert.equal((await relay.exchange(connectionId)).messages.length, BRIDGE_BATCH_CHUNKS);
+    const closed = new Promise(resolve => relay.connections.get(connectionId).socket.once('close', resolve));
+    peer.send(JSON.stringify({ kind: 'session-closed' }), () => peer.close()); await closed;
+    assert.deepEqual(await relay.exchange(connectionId), { messages: [], sessionClosed: true });
+    assert.throws(() => relay.send(connectionId, []), /SESSION_CLOSED/);
+    await assert.rejects(relay.exchange(connectionId), /SESSION_CLOSED/);
+  } finally { relay.closeAll(); await new Promise(resolve => server.close(resolve)); }
+});
+
+test('remote recovery replaces failed credentials and discards an uncertain input instead of replaying it', async () => {
+  const editors = Array.from({ length: 2 }, () => ({ sessionId: randomUUID(), editorToken: randomUUID() }));
+  const channels = new Map(), connects = [], sent = [], completed = Promise.withResolvers();
+  let transport;
+  const app = { async callServerTool({ arguments: args }) {
+    if (args.action === 'connect') {
+      const connectionId = randomUUID(); connects.push(args.sessionId);
+      channels.set(connectionId, { sessionId: args.sessionId, first: true, pending: Promise.withResolvers() });
+      return { structuredContent: { connectionId } };
+    }
+    const channel = channels.get(args.connectionId);
+    if (args.action === 'exchange') {
+      if (channel.first) { channel.first = false; return { structuredContent: { messages: encodeMessage({ kind: 'frame', rendererId: channel.sessionId }) } }; }
+      return channel.pending.promise;
+    }
+    if (args.action === 'send') {
+      const decoder = new MessageDecoder();
+      for (const chunk of args.messages) { const message = decoder.accept(chunk); if (message) sent.push({ sessionId: channel.sessionId, message }); }
+      return { isError: true, content: [{ type: 'text', text: 'service stopped during input' }] };
+    }
+    channel.pending.resolve({ isError: true, content: [{ type: 'text', text: 'channel closed' }] });
+    return { structuredContent: { closed: true } };
+  } };
+  const input = { kind: 'input', id: randomUUID(), input: { type: 'text', text: randomUUID() } };
+  try {
+    transport = createMcpTransport(app, editors[0], {
+      onmessage: ({ data }) => {
+        const message = JSON.parse(data);
+        if (message.rendererId === editors[0].sessionId) transport.send(JSON.stringify(input));
+        else completed.resolve(message);
+      }, onerror: completed.reject, onclose() {},
+      recovery: { attempts: 2, delayMs: 0, reopen: async () => editors[1] },
+    });
+    assert.equal((await completed.promise).rendererId, editors[1].sessionId);
+    assert.deepEqual(connects, editors.map(editor => editor.sessionId));
+    assert.deepEqual(sent, [{ sessionId: editors[0].sessionId, message: input }]);
+  } finally { await transport?.close(); }
+});
+
+test('closing a view during recovery prevents a late result from opening another channel', async () => {
+  const recovering = Promise.withResolvers(), reopened = Promise.withResolvers(), calls = [];
+  const transport = createMcpTransport({ async callServerTool({ arguments: args }) {
+    calls.push(args.action);
+    return { isError: true, content: [{ type: 'text', text: 'offline' }] };
+  } }, { sessionId: randomUUID(), editorToken: randomUUID() }, {
+    onmessage() { assert.fail('No frame expected'); }, onerror() { assert.fail('Teardown must suppress recovery errors'); }, onclose() {},
+    recovery: { attempts: 2, delayMs: 0, reopen: async () => { recovering.resolve(); return reopened.promise; } },
+  });
+  await recovering.promise; await transport.close();
+  reopened.resolve({ sessionId: randomUUID(), editorToken: randomUUID() }); await setImmediate();
+  assert.deepEqual(calls, ['connect']);
+  assert.equal(transport.readyState, 3);
+});
+
+test('a send still pending on the old channel cannot block acknowledgements or fail the replacement', async () => {
+  const editors = Array.from({ length: 2 }, () => ({ sessionId: randomUUID(), editorToken: randomUUID() }));
+  const oldSend = Promise.withResolvers(), replacementFrame = Promise.withResolvers(), channels = new Map(), sent = [];
+  let transport;
+  const app = { async callServerTool({ arguments: args }) {
+    if (args.action === 'connect') {
+      const connectionId = randomUUID();
+      channels.set(connectionId, { sessionId: args.sessionId, first: true, pending: Promise.withResolvers() });
+      return { structuredContent: { connectionId } };
+    }
+    const channel = channels.get(args.connectionId);
+    if (args.action === 'exchange') {
+      if (channel.first) { channel.first = false; return { structuredContent: { messages: encodeMessage({ kind: 'frame', rendererId: channel.sessionId }) } }; }
+      return channel.pending.promise;
+    }
+    if (args.action === 'send') {
+      sent.push(channel.sessionId);
+      if (channel.sessionId === editors[0].sessionId) {
+        channel.pending.resolve({ isError: true, content: [{ type: 'text', text: 'service restarted' }] });
+        return oldSend.promise;
+      }
+      return { structuredContent: { accepted: args.messages.length } };
+    }
+    channel.pending.resolve({ structuredContent: { messages: [] } });
+    return { structuredContent: { closed: true } };
+  } };
+  try {
+    transport = createMcpTransport(app, editors[0], {
+      onmessage: ({ data }) => {
+        const frame = JSON.parse(data); transport.send(JSON.stringify({ kind: 'frame-ack', id: randomUUID() }));
+        if (frame.rendererId === editors[1].sessionId) replacementFrame.resolve();
+      }, onerror: replacementFrame.reject, onclose() {},
+      recovery: { attempts: 2, delayMs: 0, reopen: async () => editors[1] },
+    });
+    await replacementFrame.promise; await setImmediate();
+    assert.deepEqual(sent, editors.map(editor => editor.sessionId));
+    oldSend.reject(new Error('late old send failure')); await setImmediate();
+    assert.equal(transport.readyState, 1);
+  } finally { oldSend.resolve({ structuredContent: { accepted: 0 } }); await transport?.close(); }
+});
+
+test('recovery stops at its configured limit when no replacement channel receives a frame', async () => {
+  const completed = Promise.withResolvers(); let connects = 0, reopens = 0;
+  const attempts = 2;
+  const transport = createMcpTransport({ async callServerTool() {
+    connects++; return { isError: true, content: [{ type: 'text', text: 'offline' }] };
+  } }, { sessionId: randomUUID(), editorToken: randomUUID() }, {
+    onmessage() { assert.fail('No frame expected'); }, onclose() {}, onerror: completed.resolve,
+    recovery: { attempts, delayMs: 0, reopen: async () => { reopens++; return { sessionId: randomUUID(), editorToken: randomUUID() }; } },
+  });
+  await completed.promise;
+  assert.equal(reopens, attempts); assert.equal(connects, attempts + 1); assert.equal(transport.readyState, 3);
 });
 
 test('draining chunks releases queue capacity before the next message arrives', async () => {

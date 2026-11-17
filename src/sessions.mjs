@@ -14,7 +14,7 @@ const fail = (code, message) => { throw new SessionError(code, message); };
 export class Sessions {
   constructor({ timeout = 15000, saveWaitTimeout = 5000, editorWaitTimeout = DEFAULT_EDITOR_WAIT_MS, draftRoot = path.join(os.tmpdir(), 'pencil-panel-drafts') } = {}) { this.items = new Map(); this.timeout = timeout; this.saveWaitTimeout = saveWaitTimeout; this.editorWaitTimeout = editorWaitTimeout; this.draftRoot = draftRoot; }
   get(id) { return this.items.get(id) ?? fail('SESSION_NOT_FOUND', 'Session inconnue'); }
-  async open(filename, scope) {
+  async open(filename, scope, { explicit = false } = {}) {
     if (!path.isAbsolute(filename) || path.extname(filename).toLowerCase() !== '.pen') fail('INVALID_PATH', 'Un fichier .pen absolu est requis');
     const file = await fs.realpath(filename);
     if (path.extname(file).toLowerCase() !== '.pen') fail('INVALID_PATH', 'La cible réelle doit être un document .pen');
@@ -22,11 +22,24 @@ export class Sessions {
     if (!stat.isFile() || stat.size > 32 * 1024 * 1024) fail('INVALID_FILE', 'Document invalide ou trop volumineux');
     const previous = [...this.items.values()].find(s => s.file === file);
     if (previous) {
+      if (previous.closing) fail('SESSION_CLOSING', 'Session is closing');
       if (previous.scope !== scope) fail('DOCUMENT_BUSY', 'Ce document appartient déjà à une autre session ; créer une copie pour une variante');
       return this.status(previous.id);
     }
     const id = randomUUID();
     const draft = path.join(this.draftRoot, `${digest(`${scope}:${file}`)}.pen`);
+    try {
+      await fs.access(`${draft}.closed`);
+      if (!explicit) fail('SESSION_CLOSED', 'An explicit document open is required after closing the session');
+      await fs.unlink(`${draft}.closed`);
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    // Marker IO can overlap another opener; claim only after rechecking the writer slot.
+    const concurrent = [...this.items.values()].find(session => session.file === file);
+    if (concurrent) {
+      if (concurrent.closing) fail('SESSION_CLOSING', 'Session is closing');
+      if (concurrent.scope !== scope) fail('DOCUMENT_BUSY', 'Document belongs to another session');
+      return this.status(concurrent.id);
+    }
     const s = { id, scope, file, draft, openedAt: Date.now(), editorReady: false, connectionWaiters: new Set(), metadataCache: new Map(), metadataStats: { requests: 0, hits: 0 }, recentCalls: [], exportJobs: new Map(), mutationRevision: 0, virtualRoot: `pencil/${id}/`, generation: 0, pending: new Map(), agents: new Map(), blocked: false, connected: false, savedHash: null, operations: 0, saveState: 'not-loaded' };
     this.items.set(id, s);
     return this.status(id);
@@ -45,7 +58,8 @@ export class Sessions {
     return { generation: s.generation, fileURI: `file:///${s.virtualRoot}${encodeURIComponent(path.basename(s.file))}` };
   }
   detach(id, generation) {
-    const s = this.get(id);
+    const s = this.items.get(id);
+    if (!s) return;
     if (generation !== s.generation) return;
     s.connected = false; s.editorReady = false; s.send = undefined; s.metadataCache.clear();
     for (const p of s.pending.values()) p.reject(new SessionError('OUTCOME_UNKNOWN', 'Connexion perdue pendant un appel'));
@@ -90,9 +104,10 @@ export class Sessions {
     }
     return structuredClone(await cache.get(key));
   }
-  schema(id) { const deadline = Date.now() + this.editorWaitTimeout; return this.metadata(id, 'schema', () => this.request(id, 'get-mcp-schema', undefined, undefined, deadline), undefined, deadline); }
+  schema(id) { if (this.get(id).closing) fail('SESSION_CLOSING', 'Session is closing'); const deadline = Date.now() + this.editorWaitTimeout; return this.metadata(id, 'schema', () => this.request(id, 'get-mcp-schema', undefined, undefined, deadline), undefined, deadline); }
   acquire(id, agent) {
     const s = this.get(id);
+    if (s.closing) fail('SESSION_CLOSING', 'Session is closing');
     if (s.blocked) fail('OUTCOME_UNKNOWN', 'Session bloquée après un résultat inconnu');
     // The legacy lease field is now a non-exclusive participation token.
     const token = randomUUID();
@@ -101,6 +116,7 @@ export class Sessions {
   }
   release(id, token) {
     const s = this.get(id), participant = s.agents.get(token);
+    if (s.closing) fail('SESSION_CLOSING', 'Session is closing');
     if (!participant) fail('INVALID_LEASE', 'Participation invalide');
     if (participant.pending.size || s.saving) fail('CALLS_IN_FLIGHT', 'Des appels restent en cours');
     if (s.blocked) fail('OUTCOME_UNKNOWN', 'Ne pas terminer une participation avec une opération inconnue');
@@ -109,6 +125,7 @@ export class Sessions {
   }
   call(id, token, name, args = {}, { observational = false } = {}) {
     const s = this.get(id), participant = s.agents.get(token);
+    if (s.closing) fail('SESSION_CLOSING', 'Session is closing');
     if (!participant) fail('INVALID_LEASE', 'Participation requise avant les appels');
     if (s.blocked) fail('OUTCOME_UNKNOWN', 'Session bloquée ; ne pas rejouer les mutations');
     if (!['execute', 'read_skill', 'get_style', 'get_app_state'].includes(name)) fail('TOOL_NOT_ALLOWED', 'Outil non exposé par ce plugin');
@@ -209,8 +226,9 @@ export class Sessions {
       return { ...result, structuredContent: { files: job.files } };
     } finally { s.exportJobs.delete(prefix); }
   }
-  async save(id, token) {
+  async save(id, token, { forClose = false } = {}) {
     const s = this.get(id);
+    if (s.closing && !forClose) fail('SESSION_CLOSING', 'Session is closing');
     if (s.saving) return this.afterSave(id, () => this.save(id, token));
     if (!s.agents.has(token) || s.pending.size || [...s.agents.values()].some(a => a.pending.size) || s.blocked || s.saving) fail('SAVE_NOT_READY', 'Rejoindre la session et attendre la fin des opérations');
     let finishSave, saveError;
@@ -227,6 +245,8 @@ export class Sessions {
         catch (error) {
           if (error.code !== 'ENOENT') throw error;
           if (digest(await fs.readFile(s.file)) !== s.savedHash) fail('SAVE_CONFLICT', 'Le fichier a changé');
+          // The engine confirmed its flush and the original still matches: no draft is needed.
+          s.saveState = 'source-saved';
           return { path: s.file, sessionId: id, unchanged: true };
         }
         try {
@@ -241,12 +261,37 @@ export class Sessions {
   }
   async saveAs(id, token, filename) {
     const s = this.get(id);
+    if (s.closing) fail('SESSION_CLOSING', 'Session is closing');
     if (s.saving) return this.afterSave(id, () => this.saveAs(id, token, filename));
     if (!s.agents.has(token) || s.pending.size || [...s.agents.values()].some(a => a.pending.size) || s.blocked || s.saving) fail('SAVE_NOT_READY', 'Rejoindre la session et attendre la fin des opérations');
     if (!['draft-saved', 'source-saved', 'conflict'].includes(s.saveState)) fail('SAVE_NOT_READY', 'Attendre un acquittement de sauvegarde du moteur avant Enregistrer sous');
     if (path.extname(filename).toLowerCase() !== '.pen') fail('INVALID_PATH', 'Choisir un nouveau fichier .pen');
     const saved = await writeNewFile(filename, await fs.readFile(s.draft));
     return { path: saved, sessionId: id, sourceUnchanged: true };
+  }
+  /** Save and dispose one exclusively held session; a failed Save retains its editor. */
+  async finish(id, token, lifecycle) {
+    const s = this.get(id);
+    if (!s.agents.has(token)) fail('INVALID_LEASE', 'Participation required');
+    if (!lifecycle) fail('CLOSE_UNSUPPORTED', 'Editor lifecycle is unavailable');
+    if (s.agents.size !== 1 || s.pending.size || [...s.agents.values()].some(a => a.pending.size) || s.saving || s.closing || s.blocked) fail('CLOSE_NOT_READY', 'Other participants or operations still use this session');
+    s.closing = true;
+    let committed = false;
+    try {
+      await lifecycle.prepare(id);
+      const saved = await this.save(id, token, { forClose: true });
+      // Durable intent prevents stale views from resurrecting a finished editor after restart.
+      await fs.mkdir(this.draftRoot, { recursive: true, mode: 0o700 });
+      await this.atomicWrite(`${s.draft}.closed`, Buffer.from('closed'));
+      committed = true;
+      await lifecycle.dispose(id);
+      s.agents.clear(); this.items.delete(id);
+      return { sessionId: id, path: s.file, closed: true, saved, rendererReleased: true };
+    } catch (error) {
+      if (committed) s.blocked = true;
+      else { s.closing = false; await lifecycle.resume(id); }
+      throw error;
+    }
   }
   persist(s, operation) {
     const result = (s.persistenceTail ?? Promise.resolve()).then(operation);
