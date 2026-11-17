@@ -11,7 +11,7 @@ const [runtimeArgument, output, packageDirectory, mode] = process.argv.slice(2),
 const probe = JSON.parse(await readFile(path.join(runtime, 'probe.json'), 'utf8'));
 const configuration = packageDirectory ? JSON.parse(await readFile(path.join(packageDirectory, 'mcp.json'), 'utf8')).mcpServers['pen-remote'] : null;
 const expand = value => value.replaceAll('${PLUGIN_ROOT}', path.resolve(packageDirectory));
-const entrypoint = configuration ? expand(configuration.args[0]) : 'experiments/remote-engine/mcp.mjs';
+const entrypoint = configuration ? expand(configuration.args[0]) : 'src/persistent/mcp.mjs';
 const environment = configuration ? Object.fromEntries(Object.entries(configuration.env).map(([key, value]) => [key, expand(value)])) : { PENCIL_REMOTE_CONNECTION: path.join(runtime, 'connection.json') };
 const delayed = mode === '--delayed-connection' ? await mkdtemp(path.join(os.tmpdir(), 'remote-live-startup-')) : null;
 if (delayed) environment.PENCIL_REMOTE_CONNECTION = path.join(delayed, 'connection.json');

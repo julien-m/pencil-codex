@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { inputSchema } from '../experiments/remote-engine/input.mjs';
-import { imagePoint } from '../experiments/remote-engine/point.mjs';
-import { keyboardInput } from '../experiments/remote-engine/keyboard.mjs';
-import { RendererHost } from '../experiments/remote-engine/renderer.mjs';
+import { inputSchema } from '../src/persistent/input.mjs';
+import { imagePoint } from '../src/persistent/point.mjs';
+import { keyboardInput } from '../src/persistent/keyboard.mjs';
+import { RendererHost } from '../src/persistent/renderer.mjs';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { attachViewChannel } from '../experiments/remote-engine/view-channel.mjs';
+import { attachViewChannel } from '../src/persistent/view-channel.mjs';
 
 test('pointer mapping accounts for letterboxing and rejects the surrounding area', () => {
   const images = [{ width: 1200, height: 800 }, { width: 800, height: 1200 }];
@@ -68,7 +68,7 @@ test('an image acknowledgement arriving before attachment is retained', async ()
   assert.deepEqual(acknowledgements, [frameId]);
 });
 test('closing one renderer context releases its cached frame and viewers without closing the shared browser', async () => {
-  const { RendererHost } = await import('../experiments/remote-engine/renderer.mjs');
+  const { RendererHost } = await import('../src/persistent/renderer.mjs');
   const host = new RendererHost({}); let contextClosed = false, viewerClosed = false;
   const first = crypto.randomUUID(), other = crypto.randomUUID();
   const state = { pendingInputs: 0, keys: new Set(), buttons: new Set(), inputTail: Promise.resolve(), frame: { data: 'cached' }, context: { async close() { contextClosed = true; } }, viewers: new Set([{ socket: { readyState: 1, send(data, done) { assert.equal(JSON.parse(data).kind, 'session-closed'); done(); }, close() { viewerClosed = true; } } }]) };

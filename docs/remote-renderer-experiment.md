@@ -1,8 +1,8 @@
 # Persistent renderer experiment
 
-This opt-in prototype runs one invisible Pen renderer per design session in a shared headless Chrome process. Agents and the interactive view operate on that renderer. There is no second Pen editor in the view and no synchronization between independent document states.
+The implementation originally tested here runs one invisible Pen renderer per design session in a shared headless Chrome process. Agents and the interactive view operate on that renderer. There is no second Pen editor in the view and no synchronization between independent document states.
 
-The installed vendor plugin, default plugin configuration and Codex application are unchanged. This is a feasibility implementation on `feat/persistent-session-engine`, not an installed production replacement.
+Pencil0.7.0 promotes this implementation on main. The official vendor plugin and Codex application are separate; the notes below retain the historical experiment evidence.
 
 ## Ownership and transport
 
@@ -16,10 +16,10 @@ The standalone view uses an authenticated loopback WebSocket. The experimental M
 
 ## Reproduce locally
 
-Install dependencies with `bun install --frozen-lockfile`. Register [the experimental service](../experiments/remote-engine/server.mjs) with Localhost Supervisor, using an explicit free loopback port, an installed Chrome executable, and a private runtime directory. The service command is:
+Install dependencies with `bun install --frozen-lockfile`. Register [the experimental service](../src/persistent/server.mjs) with Localhost Supervisor, using an explicit free loopback port, an installed Chrome executable, and a private runtime directory. The service command is:
 
 ```bash
-node experiments/remote-engine/server.mjs <port> <chrome-executable> <private-runtime-directory>
+node src/persistent/server.mjs <port> <chrome-executable> <private-runtime-directory>
 ```
 
 Use temporary lifetime, manual autostart and no automatic restart for a one-off diagnostic run. Once an installed Pen Remote plugin points to this service for continued use, manage it as a persistent service: supervisor autostart, restart on failure and no expiration. The service writes `connection.json` with mode `0600`; do not publish it. It is not started by the default plugin.
@@ -27,49 +27,27 @@ Use temporary lifetime, manual autostart and no automatic restart for a one-off 
 Run the isolated two-document probe, then the transport/security checks:
 
 ```bash
-node experiments/remote-engine/live-probe.mjs <runtime>/connection.json <live-receipt.json>
+node src/persistent/live-probe.mjs <runtime>/connection.json <live-receipt.json>
 node tests/remote-mcp-live.mjs <runtime> <mcp-receipt.json>
 node tests/remote-security-live.mjs <runtime> <security-receipt.json>
-node experiments/remote-engine/hidden-probe.mjs <runtime> <hidden-receipt.json> 310
+node src/persistent/hidden-probe.mjs <runtime> <hidden-receipt.json> 310
 ```
 
 The first probe creates disposable files and private view links in `<runtime>/probe.json`. Keep its B view closed during the hidden probe. Its 310-second quiet period tests operation beyond typical view inactivity windows; the exact command has a 360-second deadline. It is a functional observation, not a capacity benchmark or proof of macOS sleep resilience.
 
-For interactive verification, open A's private `viewURL` in an agent-owned browser. Import `runUIProbe` from [the UI probe](../experiments/remote-engine/ui-probe.mjs) and pass its page, parsed connection/probe objects and a receipt path. It derives a click target from rendered pixels, nudges the selected object, verifies the changed engine coordinate, changes its color through an agent call, waits for that color in the image and saves through the view.
+For interactive verification, open A's private `viewURL` in an agent-owned browser. Import `runUIProbe` from [the UI probe](../src/persistent/ui-probe.mjs) and pass its page, parsed connection/probe objects and a receipt path. It derives a click target from rendered pixels, nudges the selected object, verifies the changed engine coordinate, changes its color through an agent call, waits for that color in the image and saves through the view.
 
-The opt-in stdio MCP entrypoint is [the experimental adapter](../experiments/remote-engine/mcp.mjs):
+The opt-in stdio MCP entrypoint is [the experimental adapter](../src/persistent/mcp.mjs):
 
 ```bash
-PENCIL_REMOTE_CONNECTION=<absolute-runtime>/connection.json node experiments/remote-engine/mcp.mjs
+PENCIL_REMOTE_CONNECTION=<absolute-runtime>/connection.json node src/persistent/mcp.mjs
 ```
 
 Its open/new tools return the remote-view MCP App resource. Source mode requires development dependencies and the separately running service. Do not replace the installed vendor configuration with it as part of a feasibility test.
 
-## Separate local Codex plugin
+## Promotion to Pencil
 
-Build a separate package, with the service already running and an empty destination:
-
-```bash
-bun scripts/build-remote-plugin.ts <absolute-runtime> <absolute-package-destination>
-codex plugin marketplace add <absolute-package-destination> --json
-codex plugin add pen-remote@pen-remote-local --json
-```
-
-The generated **Pen Remote** plugin contains a bundled Node MCP server and prebuilt MCP App HTML. Its installed process does not require development dependencies. Local manifest paths reference the supervised runtime; connection tokens and documents are not copied into the package. The service remains separate and must be available. A temporary service's expiration also ends the experiment's availability.
-
-Version 0.1.1 keeps MCP discovery available even when the supervised engine is stopped or its connection file is absent. Engine calls report unavailability without terminating MCP. Each new call reads and validates the current connection, allowing recovery after the service starts or rotates its credential. This does not replay failed operations or restore live document sessions after a crash.
-
-Activate Pen Remote in the target chat. The currently running agent may not expose newly installed tools until another turn or host reload. Installation alone proves neither activation nor native view rendering. The existing pen.dev plugin remains installed separately.
-
-The installed-package transport probe uses the actual cache directory:
-
-```bash
-node tests/remote-mcp-live.mjs <absolute-runtime> <receipt.json> <installed-package-directory>
-```
-
-Add `--delayed-connection` after the package directory to verify offline initialization followed by a successful connection to the real engine in the same MCP process. The ordinary suite also checks missing and subsequently invalid connection configuration without requiring a live engine.
-
-It verifies required scope rejection, same-renderer attachment, the generated resource and an actual JPEG through MCP. It is a scripted stdio client, not a native Codex rendering test. For native acceptance, open one document with this chat's scope, verify the rendered view, record its renderer ID, switch to another chat, modify the first session through its agents while hidden, and return to verify the same renderer and updated content. The other chat must use its own scope and document. Do not count browser-panel opening as plugin-view acceptance.
+This historical experiment is now the Pencil0.7.0 implementation. Read [the canonical installation and lifecycle](pencil-persistent.md). The former package builder and separate Pen Remote installation have been removed; install `pencil@pencil` from the canonical repository. Measurements below describe the versions and dates stated.
 
 ## Observed validation
 

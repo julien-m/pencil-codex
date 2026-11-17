@@ -4,15 +4,16 @@ import { readFile, mkdir, writeFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { startBroker } from '../../src/broker.mjs';
+import { startBroker } from '../broker.mjs';
 import { RendererHost } from './renderer.mjs';
 import { attachViewChannel } from './view-channel.mjs';
 
-const root = path.dirname(fileURLToPath(import.meta.url));
+const moduleRoot = path.dirname(fileURLToPath(import.meta.url));
+const root = path.basename(moduleRoot) === 'dist' ? path.join(moduleRoot, 'persistent') : moduleRoot;
 const same = (left, right) => typeof left === 'string' && Buffer.byteLength(left) === Buffer.byteLength(right) && timingSafeEqual(Buffer.from(left), Buffer.from(right));
 const assets = new Map([['/', ['view.html', 'text/html']], ['/engine', ['engine.html', 'text/html']], ['/view.mjs', ['view.mjs', 'text/javascript']], ['/engine.mjs', ['engine.mjs', 'text/javascript']], ['/point.mjs', ['point.mjs', 'text/javascript']], ['/keyboard.mjs', ['keyboard.mjs', 'text/javascript']]]);
 
-/** Start the opt-in experiment; the installed plugin is deliberately unchanged. */
+/** Start the supervised Pencil service; editor lifetime is independent of its views. */
 export async function startRemoteExperiment({ port, executablePath, runtimeDirectory }) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('A valid explicit loopback port is required');
   await mkdir(runtimeDirectory, { recursive: true, mode: 0o700 });
@@ -90,7 +91,7 @@ export async function startRemoteExperiment({ port, executablePath, runtimeDirec
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const [port, executablePath, runtimeDirectory] = process.argv.slice(2);
   const experiment = await startRemoteExperiment({ port: Number(port), executablePath, runtimeDirectory });
-  console.log('Remote Pen experiment ready');
+  console.log('Pencil persistent service ready');
   let closing = false;
   const shutdown = async () => { if (closing) return; closing = true; await experiment.close(); process.exit(0); };
   process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);

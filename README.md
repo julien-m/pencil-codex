@@ -1,16 +1,25 @@
-# Pencil
+# Pencil for Codex
 
-<p align="center">
-  <img src="docs/images/login-forma.png" alt="Forma light login designed in Pencil" width="49%" />
-  <img src="docs/images/login-orbit.png" alt="Orbit dark login designed in Pencil" width="49%" />
-</p>
-<p align="center"><em>Two login screens designed in Pencil, saved to a .pen document, and exported with this plugin.</em></p>
+Pencil 0.7.0 uses a persistent editor per design session. Agents keep working while the native panel is closed. `pencil_close` saves and releases the finished session without stopping other documents or the shared service. This replaces the separately installed Pen Remote experiment.
 
-Open [the editable demo](examples/login-demo.pen) to inspect both screens. These are design mockups, not an authentication implementation.
+## Installation and service
 
-A Codex plugin that opens `.pen` design documents in an embedded Pencil editor, without adding another chat interface. A local Node.js service maintains one channel per design session. Multiple agents share a `sessionId` and can submit operations concurrently. Exclusivity applies between design sessions, not between agents within one session.
+```bash
+codex plugin marketplace add julien-m/pencil-codex
+codex plugin add pencil@pencil
+```
 
-Pen Remote 0.1.5 adds `pencil_close`: finish with your sole remaining lease to save and release that session's views and editor. The shared browser/service and other documents remain available. Closing the panel or calling `pencil_end` alone keeps the editor alive. Explicitly open the document again to resume.
+Built bundles are committed; the MCP adapter requires Node.js22+ and no development dependencies. Run `bun install --frozen-lockfile` in the source checkout to install the service’s Playwright dependency. The persistent service must be managed by Localhost Supervisor and started separately. It requires an installed Chrome executable and network access to the hosted pen.dev editor.
+
+```bash
+node dist/persistent-service.mjs <port> <chrome-executable> <runtime-directory>
+```
+
+Use `Library/Application Support/Pencil/codex` under the user directory for the service runtime. The adapter reads its private `connection.json` there, independently of plugin updates/cache paths. Override with `PENCIL_CONNECTION` when needed. Do not commit credentials or documents.
+
+Open via `pencil_open` or `pencil_new` with a unique chat scope. `pencil_begin` joins; tools operate on the shared engine. `pencil_end` only leaves; `pencil_close` saves and disposes the final participant’s session. Another participant or pending operation prevents closure. Read [the lifecycle and migration details](docs/pencil-persistent.md).
+
+Earlier UI/engine validation reports below describe their stated historical versions, not fresh validation of0.7.0.
 
 ## Repository and platform
 

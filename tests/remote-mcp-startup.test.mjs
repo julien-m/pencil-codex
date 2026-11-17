@@ -11,7 +11,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 test('MCP tools survive an absent engine and read its connection when it becomes available', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'remote-mcp-startup-'));
   const connection = path.join(directory, 'connection.json');
-  const transport = new StdioClientTransport({ command: process.execPath, args: ['experiments/remote-engine/mcp.mjs'], env: { ...process.env, PENCIL_REMOTE_CONNECTION: connection }, stderr: 'pipe' });
+  const transport = new StdioClientTransport({ command: process.execPath, args: ['src/persistent/mcp.mjs'], env: { ...process.env, PENCIL_REMOTE_CONNECTION: connection }, stderr: 'pipe' });
   transport.stderr.on('data', () => {});
   const client = new Client({ name: 'offline-startup-test', version: '1.0.0' });
   try {

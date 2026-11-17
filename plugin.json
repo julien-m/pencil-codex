@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "pencil",
-  "version": "0.5.1",
-  "description": "Éditeur Pencil sans chat pour les fichiers .pen, avec canal par session et collaboration multi-agent.",
+  "version": "0.7.0",
+  "description": "Persistent Pencil editor with a native Codex view and shared per-session engine.",
   "author": {
     "name": "Julien M"
   },
@@ -17,11 +17,12 @@
     "com.openai": {
       "interface": {
         "displayName": "Pencil",
-        "shortDescription": "Éditer les .pen dans le panneau",
-        "longDescription": "Vue Pencil sans chat et canal partagé par les agents d’une même session de design.",
+        "shortDescription": "Persistent design sessions",
+        "longDescription": "Edit .pen documents in Codex. Agents keep working with the panel closed; explicitly close a session to save and release its editor.",
         "developerName": "Julien M",
         "category": "Productivity",
         "capabilities": [
+          "Interactive",
           "Read",
           "Write"
         ],

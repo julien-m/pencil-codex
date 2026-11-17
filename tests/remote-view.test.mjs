@@ -8,7 +8,7 @@ import { build } from 'esbuild';
 import { encodeMessage } from '../shared/bridge-wire.mjs';
 
 const bundle = await build({
-  entryPoints: ['experiments/remote-engine/view.mjs'], bundle: true, format: 'iife', platform: 'browser', write: false,
+  entryPoints: ['src/persistent/view.mjs'], bundle: true, format: 'iife', platform: 'browser', write: false,
   plugins: [{ name: 'host-boundary', setup(builder) {
     builder.onResolve({ filter: /^@modelcontextprotocol\/ext-apps$/ }, () => ({ path: 'host', namespace: 'test' }));
     builder.onLoad({ filter: /.*/, namespace: 'test' }, () => ({ contents: 'export const App = globalThis.HostApp;' }));

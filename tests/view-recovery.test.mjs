@@ -5,7 +5,7 @@ import { mkdtemp, writeFile, symlink, unlink, rm, realpath } from 'node:fs/promi
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { ViewRecovery } from '../experiments/remote-engine/view-recovery.mjs';
+import { ViewRecovery } from '../src/persistent/view-recovery.mjs';
 
 test('recovery grants retain canonical document/scope authority and coalesce concurrent reopen requests', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'pen-recovery-'));

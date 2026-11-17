@@ -3,11 +3,13 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { UiRelay } from '../../src/ui-relay.mjs';
+import os from 'node:os';
+import path from 'node:path';
+import { UiRelay } from '../ui-relay.mjs';
 import { BRIDGE_BATCH_CHUNKS } from '../../shared/bridge-wire.mjs';
 import { ViewRecovery } from './view-recovery.mjs';
 
-const connectionPath = process.env.PENCIL_REMOTE_CONNECTION ?? fileURLToPath(new URL('../../.runtime/remote-engine/connection.json', import.meta.url));
+const connectionPath = process.env.PENCIL_CONNECTION ?? process.env.PENCIL_REMOTE_CONNECTION ?? path.join(os.homedir(), 'Library', 'Application Support', 'Pencil', 'codex', 'connection.json');
 async function readConnection() {
   let bytes;
   try { bytes = await readFile(connectionPath, 'utf8'); }
@@ -17,11 +19,11 @@ async function readConnection() {
   }
   const connection = z.object({ origin: z.string().url(), token: z.string().uuid() }).parse(JSON.parse(bytes));
   const origin = new URL(connection.origin);
-  if (origin.protocol !== 'http:' || origin.hostname !== '127.0.0.1' || !origin.port || origin.username || origin.password) throw new Error('The experiment requires a local supervised service');
+  if (origin.protocol !== 'http:' || origin.hostname !== '127.0.0.1' || !origin.port || origin.username || origin.password) throw new Error('Pencil requires a local supervised service');
   return { origin: origin.origin, token: connection.token };
 }
-const server = new McpServer({ name: 'pencil-persistent-renderer', version: '0.6.0-experiment' });
-const resource = 'ui://pencil-remote/editor-v5.html';
+const server = new McpServer({ name: 'pencil', version: '0.7.0' });
+const resource = 'ui://pencil/editor-v7.html';
 let relay;
 const object = result => ({ content: [{ type: 'text', text: JSON.stringify(result) }], structuredContent: result });
 const wrap = fn => async args => {
@@ -39,7 +41,8 @@ const viewRecovery = new ViewRecovery(async document => editorGrant(await rpc('o
 let resourceHTML;
 server.registerResource('persistent-pen-view', resource, {}, async () => {
   if (!resourceHTML) {
-    if (process.env.PENCIL_REMOTE_VIEW) resourceHTML = await readFile(process.env.PENCIL_REMOTE_VIEW, 'utf8');
+    if ((process.env.PENCIL_VIEW ?? process.env.PENCIL_REMOTE_VIEW)) resourceHTML = await readFile((process.env.PENCIL_VIEW ?? process.env.PENCIL_REMOTE_VIEW), 'utf8');
+    else if (path.basename(fileURLToPath(import.meta.url)) === 'pencil.mjs') resourceHTML = await readFile(new URL('persistent/app.html', import.meta.url), 'utf8');
     else {
       // Source-checkout mode only; installed packages use a prebuilt resource.
       const { build } = await import('esbuild');
