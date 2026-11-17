@@ -1,6 +1,8 @@
 # Pencil for Codex
 
-Pencil 0.7.1 uses a persistent editor per design session. Agents keep working while the native panel is closed. `pencil_close` saves and releases the finished session without stopping other documents or the shared service. This replaces the separately installed Pen Remote experiment.
+Pencil **0.7.1** opens opaque `.pen` documents in a native Codex view backed by a persistent hosted Pen editor. The implementation is now on `main` under the existing `pencil@pencil` identity. Pen Remote is no longer a separate plugin.
+
+The [Claude Code version](https://github.com/julien-m/pencil-claude) is maintained in its own repository. Both use a persistent renderer; the Claude version additionally exposes its selection and local document catalog tools.
 
 ## Installation and service
 
@@ -9,160 +11,77 @@ codex plugin marketplace add julien-m/pencil-codex
 codex plugin add pencil@pencil
 ```
 
-Built bundles are committed; the MCP adapter requires Node.js22+ and no development dependencies. Run `bun install --frozen-lockfile` in the source checkout to install the service’s Playwright dependency. The persistent service must be managed by Localhost Supervisor and started separately. It requires an installed Chrome executable and network access to the hosted pen.dev editor.
+The installed MCP adapter is `dist/pencil.mjs`, selected by [the MCP manifest](mcp.json). It requires Node.js 22+ and runs without a compiler or development dependencies. Existing chats may retain older plugin processes; start a new client session to load an update.
 
-```bash
-node dist/persistent-service.mjs <port> <chrome-executable> <runtime-directory>
+The persistent service is separate. Install its source dependencies with `bun install --frozen-lockfile`, then register this executable and its arguments with Localhost Supervisor:
+
+```text
+node /absolute/path/pencil/dist/persistent-service.mjs <port> <chrome-executable> <private-runtime-directory>
 ```
 
-Use `Library/Application Support/Pencil/codex` under the user directory for the service runtime. The adapter reads its private `connection.json` there, independently of plugin updates/cache paths. Override with `PENCIL_CONNECTION` when needed. Do not commit credentials or documents.
+It requires Chrome, `playwright-core` and network access to `https://app.pen.dev`. Use `~/Library/Application Support/Pencil/codex` as the normal private runtime directory. The MCP adapter reads its `connection.json` there independently of plugin cache paths; `PENCIL_CONNECTION` overrides the connection file. The service must be supervised as permanent, with autostart and restart on failure. MCP clients do not launch or stop it. Never publish connection tokens or private view URLs.
 
-Open via `pencil_open` or `pencil_new` with a unique chat scope. `pencil_begin` joins; tools operate on the shared engine. `pencil_end` only leaves; `pencil_close` saves and disposes the final participant’s session. Another participant or pending operation prevents closure. Read [the lifecycle and migration details](docs/pencil-persistent.md).
+## Sessions and resource lifetime
 
-Earlier UI/engine validation reports below describe their stated historical versions, not fresh validation of 0.7.1.
+The service owns one headless Chrome browser and one isolated context/page per design session. The native view displays the same editor that agents modify; it does not start a second editor.
 
-## Repository and platform
+- Opening a document starts its engine independently of the visible panel. Closing or hiding the panel leaves background work available.
+- `pencil_end` releases one participation lease and keeps the editor alive.
+- The final participant uses `pencil_close` when the document task is finished. It saves, closes that session’s views and releases its context, cached frame and viewers. Success consumes the lease; do not call `pencil_end` afterward.
+- Another participant, pending work, failed Save or uncertain state prevents successful disposal. A failed Save retains the editor; an uncertain disposal is quarantined.
+- Automatic recovery never replays edits or resurrects an intentionally closed session. Explicitly opening the same saved document restores its content and node IDs with new session and renderer IDs. Other documents and the shared service remain available.
 
-This repository, **pencil-codex**, contains one independently installable Codex plugin. Its display name is **Pencil**, and its plugin identifier is `pencil`. A future Claude-specific implementation would live in a separate `pencil-claude` repository; that implementation is not included here.
+Read [the lifecycle and migration contract](docs/pencil-persistent.md).
 
-Read [the plugin manifest](plugin.json) for its identity, [the MCP configuration](mcp.json) for the stdio server, [the server](src/server.mjs) for tool-driven opening, [the session manager](src/sessions.mjs) for session ownership and agent participation, and [the editor view](web/editor.mjs) for the Pencil bridge.
+## Usage and collaboration
 
-## Status and requirements
+1. Call `pencil_open` with an existing absolute `.pen` path and a scope unique to this chat, or `pencil_new` with a new absolute path and scope. Both fields are required. There is no implicit MCP-process or `CODEX_THREAD_ID` scope.
+2. Keep the returned `sessionId`. Each collaborating agent joins with `pencil_begin` and uses its own non-exclusive participation lease. Share the session ID, not connection credentials. A different scope cannot open a second writer on the same file.
+3. Use `pencil_tools` for native schemas and `pencil_call` → `read_skill` before editing; inspect `get_app_state` and derive current node IDs. Documentation/schema reads are coalesced per session and engine generation.
+4. Work on separate frames, reread before changes and preserve other agents’ nodes. Shared engine JavaScript globals require distinct variable names. New documents are empty; frame counts, positions and content come from the task.
+5. Leave temporary participation with `pencil_end`; finish the whole document with `pencil_close` as its final participant.
 
-The experimental `feat/persistent-session-engine` branch now includes a persistent invisible renderer per session and an interactive view of that same renderer. Tests cover document isolation, shared agent access, view reconnection, pointer/keyboard editing and agent changes appearing in the view. Read [the experiment guide](docs/remote-renderer-experiment.md) for reproduction and limits, and [the earlier feasibility results](docs/persistent-engine-feasibility.md) for why two independent editors were rejected. The experiment is opt-in and does not change the installed plugin.
+Read [the plugin skill](skills/pencil/SKILL.md). `.pen` contents are opaque: edit through the engine, never by parsing or rewriting the file manually. `Generate(...)` asynchronous generation is unsupported. The syntactic guard is not a JavaScript sandbox.
 
-The branch can also build a separate **Pen Remote** local plugin with a precompiled MCP App resource. Its adapter requires an explicit chat scope; it never treats a global MCP process as the current chat. Read [the local installation steps](docs/remote-renderer-experiment.md#separate-local-codex-plugin) before testing it. Native MCP App rendering, background edits after changing chats, returning to the same renderer and saving through the native view were verified on 2026-11-17. Two actual model agents also edited one shared document with no viewer attached; the other chat documents remained isolated.
+## Save, captures and exports
 
-Pen Remote 0.1.1 exposes its MCP tools while the engine is offline and reads the current supervised connection on each engine call. An absent connection file no longer terminates tool discovery. Keep the supervised service persistent when using the installed experimental plugin across app restarts.
+| Tool | Result |
+|---|---|
+| `pencil_save` | Flushes and saves the opened source, retaining the previous bytes and checking for external conflicts |
+| `pencil_close` | Performs Save, then releases the finished session’s editor |
+| `pencil_save_as` | Writes an acknowledged snapshot to a new `.pen` path without switching the active source |
+| `pencil_capture` | Writes PNG captures of requested node IDs |
+| `pencil_export` | Exports PNG, JPEG, WEBP, PDF, HTML/CSS or HTML/Tailwind |
 
-Pen Remote 0.1.3 adds bounded view recovery after a supervised engine restart. The MCP process retains an opaque grant for the previously opened document and scope; the view can reopen that document and attach to its new renderer without replaying pointer, keyboard or Save messages. A new open result also replaces an obsolete view channel. Recovery does not restore participation leases or survive termination of the MCP process itself. Read [the recovery contract and validation limits](docs/remote-renderer-experiment.md#native-view-recovery).
+Destination directories must exist. New documents, Save As, captures and exports never overwrite an existing destination. These operations require the appropriate participation lease. The native view’s **Save document** button also saves the source.
 
-Pen Remote 0.1.2 fixes a script assembly error that made the native panel time out. Bundled JavaScript is inserted literally, and the MCP App resource has a new versioned URI. Existing chats may retain their previous MCP process/resource until the host reloads it; installing the new package does not update every already-open panel.
+Autosave keeps a separate private draft. An older snapshot cannot acknowledge a later completed mutation. Explicit Save flushes the engine, checks its source baseline and returns `source-saved` after publication. External changes produce `SAVE_CONFLICT`; preserve work with Save As. Older drafts without a baseline also require Save As.
 
-**The native Codex panel was validated with version 0.5.1 on 2026-10-21.** A real `pencil_open` call opened the side panel automatically. Two actual model sub-agents created their own designs in the same document. Native editing, panel-button saving, captures and a persistent 3.18-MB document were exercised from a clean installation without development dependencies. Read [the measured validation report](docs/installed-validation.md) for timings and hidden-panel limitations. This verifies the tested host, not every Codex version or configuration.
+Publication retains the previous source in a hidden `.pencil-save-*` directory beside it. This is not a filesystem compare-and-swap or crash-durable database transaction. After an interrupted Save, inspect recovery copies before deleting them. Avoid another application writing the same source concurrently.
 
-The native view uses the standard MCP Apps host bridge (`app.callServerTool`). The Node server relays messages to the authenticated local service; the iframe does not open a loopback WebSocket.
+Save requires quiescent operations. Calls arriving during Save wait within a bounded deadline; failure or `SAVE_WAIT_TIMEOUT` rejects them without dispatch. `OUTCOME_UNKNOWN` means never replay a mutation. Confirm recovery and reread before further work. Assets are confined to `images/` and `fonts/`; path traversal, symbolic links and `.pen` asset substitution are rejected. External `.pen` libraries and the vendor dashboard are unsupported.
 
-The version 0.4.1 installed editor resource was validated in a local browser against the real hosted engine. Three model sub-agents independently created their own frames in one initially empty document; the shared document was saved and captured. Scripted fixtures test transport mechanics and are not independent agents. Automated transport tests separately verify overlapping requests. Read [the installed-validation report](docs/installed-validation.md) for measurements and limitations. Opening the same document under another session scope remains rejected with `DOCUMENT_BUSY`.
+## Views, accessibility and diagnostics
 
-Requirements:
+The view transports images, pointer and keyboard input through the MCP Apps host bridge. It declares no direct external connection domain. Keyboard focus and a visible status are provided, but screen-reader access to editor objects is not available through this image-based view.
 
-- Codex with plugin and MCP Apps support.
-- Node.js 22 or later.
-- Network access to the hosted Pencil editor at `https://app.pen.dev/new?embed`.
-- A host that permits the embedded pen.dev frame and MCP Apps server-tool calls.
-- Bun for development and tests only.
-
-The plugin does not redistribute the proprietary Pencil engine and does not work offline.
-
-The native view declares no direct connection domains. Its internal `pencil_editor_bridge` tool is visible only to the app and uses a private connection capability with a two-minute inactivity expiry after authenticating the session grant. A bridge failure stops the channel without replaying messages or falling back to a browser. The standalone development preview retains its direct WebSocket transport.
-
-The native bridge waits up to five seconds per quiet receive poll (about 0.2 polls/second, before host overhead). Sending runs independently, so a quiet poll does not hold engine responses or Save requests. Messages are split into ordered chunks of at most 32768 JavaScript string characters, with at most four chunks per tool exchange; chunks are reassembled before dispatch. Missing or reordered chunks close the channel rather than replaying a mutation. `pencil_status.bridge` exposes per-view exchange/push counts and timestamps for measurement. The relay expires after two minutes without traffic; an actual host teardown closes it. A visually masked panel remained operational for over 30 seconds in the tested host, which still reported its document as visible. Suspended or minimized webviews are not covered by that test.
-
-## Installation
-
-```bash
-codex plugin marketplace add julien-m/pencil-codex
-codex plugin add pencil@pencil
-```
-
-The installable bundles are included in Git, so installation does not require a compiler or a local `node_modules` directory. If an existing conversation does not expose the installed tools, restart Codex and resume the conversation; no slash reload command is provided by this plugin. See the tested-host scope above.
+`pencil_status` reports readiness, renderer identity, participants, active/waiting calls, Save state, cached metadata and bounded request timestamps. Activity is reported through tools; the view does not currently display a per-agent activity list or distinct agent canvas cursors. The core readiness wait defaults to 60 seconds; opening also includes the renderer’s bounded startup checks. An offline service leaves tool discovery available and returns an error without replaying operations.
 
 ## Development and validation
 
 ```bash
-git clone https://github.com/julien-m/pencil-codex.git
-cd pencil-codex
 bun install --frozen-lockfile
 bun run build
 bun run test
 bun run test:protocol
 ```
 
-To install from a local checkout:
+The build produces `dist/pencil.mjs`, `dist/persistent-service.mjs`, the `dist/persistent/` assets and license notices. Legacy panel/server bundles remain for compatibility tests and historical tooling; the installed manifest does not select them. `bun run preview` is a legacy development harness with its own broker, not the installed persistent service.
 
-```bash
-codex plugin marketplace add "$PWD"
-codex plugin add pencil@pencil
-```
+The installed 0.7.1 adapter and real hosted engine passed modification, close and explicit reopen with exact content/UUID-variable preservation, intentional terminal transport shutdown and another renderer remaining intact. All probe editors were then closed. These checks use the installed MCP adapter and actual image transport; they do not certify fresh native Codex UI rendering of 0.7.1.
 
-To inspect a disposable design in the standalone local browser preview:
-
-```bash
-bun run preview /absolute/path/to/example.pen
-```
-
-Open the local URL printed by that command. The preview is a development harness with its own broker; it does not automatically join the broker used by the installed MCP server. Its diagnostic output contains local connection credentials: do not publish it.
-
-The build generates `dist/server.mjs`, `dist/daemon.mjs`, `dist/editor.html` and third-party license notices. Keep these files current when changing the source. Unit tests use Bun; the real HTTP/WebSocket transport and MCP stdio tests use Node.js, matching the installed runtime.
-
-## Usage
-
-1. Ask the agent to use the installed Pencil plugin. Call `pencil_open` with an absolute file path and an explicit design-session `scope`, or call `pencil_new` to create a document. The tool returns its UI resource; rendering and connecting that resource depend on the host.
-2. Launch collaborating agents while the view opens. `pencil_begin` joins immediately even offline; only engine calls wait for readiness. Call `pencil_tools` to discover the native schemas, then load the native instructions through `pencil_call` with `read_skill`.
-3. Each agent calls `pencil_begin` to join, uses its own returned `lease` with `pencil_call`, then leaves with `pencil_end`. The legacy field name `lease` now identifies a non-exclusive participation token. Agents can join and send requests at the same time; one agent leaving does not end the others’ participation.
-4. Give every agent collaborating on that document the same returned `sessionId`. Do not open the same file under another `scope` to create a second writer.
-
-Engine JavaScript globals are shared by all agents in one session. Prefix persistent variables and helpers with each agent's identifier, such as `agent3_screen`, to avoid collisions. For outlines use `stroke: {type: 'color', color: '#RRGGBB'}` and a separate `strokeWidth`; do not use `align` or `thickness` inside `stroke`.
-
-New documents start empty. Each agent creates its own frame in its first `execute`, using an orchestrator-assigned position or `FindEmptySpace`. Screen count, names, dimensions, colors and content come from the task, never a prepared scenario. Read [the plugin skill](skills/pencil/SKILL.md) before coordinating agents.
-
-Implicit scopes use `CODEX_THREAD_ID` when available, otherwise the MCP process identity. This is not a guaranteed native conversation identifier: agents must explicitly share the returned `sessionId`. The `agent` field is an activity label, not an authenticated identity.
-
-The plugin opens documents only through `pencil_open` or `pencil_new`. It does not register an automatic `.pen` file association.
-
-## Startup and session metadata
-
-`PENCIL_EDITOR_WAIT_MS` sets the maximum editor readiness wait in milliseconds (default 60000). Joining with `pencil_begin` requires no view and responds immediately. Only engine-dependent calls wait during loading. The local service advertises its effective wait and RPC deadline; MCP clients use those advertised values even when their environment differs. Expiration returns `EDITOR_OFFLINE` without sending a mutation. The readiness signal is the hosted engine bridge handshake, rather than just an open WebSocket.
-
-Concurrent `read_skill` requests for the same path share one channel round trip, then receive independent copies of the cached response. Tool schemas use the same session cache. A reconnect creates a new engine generation and invalidates both caches. Errors are not cached. This removes repeated metadata requests; it does not shorten loading of the hosted Pencil engine or language-model preparation.
-
-`pencil_status` exposes `openedAt`, `readyAt`, generation-local metadata counters and bounded `recentCalls` with request, dispatch and completion timestamps. Every skill read, including a warm-cache read, has its own history entry. Cache hits have a request timestamp and `cacheHit`, with no channel dispatch timestamp. Per-agent and total `activeCalls` count operations actually sent to the engine; `waitingCalls` count those held for readiness, Save or a shared metadata response. The header distinguishes waiting for the engine from execution and Save waits. Measure the installed `dist/` server from a clean clone without development dependencies; demonstration data belongs only in examples and test fixtures.
-
-## Save, captures and exports
-
-| Tool | Result |
-|---|---|
-| `pencil_save` | Flushes current editor changes and saves them to the opened `.pen` file, preserving a recovery copy and checking for external conflicts |
-| `pencil_new` | Creates a `.pen` file at the selected absolute path and returns its editor view |
-| `pencil_capture` | Captures component/screen IDs, or `["document"]` for the whole design, as PNG files in the selected directory |
-| `pencil_export` | Exports PNG, JPEG, WEBP, PDF, HTML/CSS or HTML/Tailwind and returns the files actually written |
-| `pencil_save_as` | Copies the last acknowledged snapshot into a new `.pen` file at the selected path |
-
-Destination directories must already exist. `pencil_new`, `pencil_save_as`, captures and exports never overwrite an existing destination. Explicit `pencil_save` updates the currently opened file. Captures and exports require an agent participation token. Documents remain opaque to the plugin: the Pencil engine manages their contents, while the plugin transports and stores their bytes.
-
-Native screenshots may be optimized previews; use raster export when a higher-resolution image is needed. Captures, all six export formats, document creation and Save As have been exercised on disposable test designs.
-
-## Navigation and agent activity
-
-The embedded view contains the real Pencil editor. Selection tools, zoom, Layers and component navigation remain available. Sign In, Goodies and settings remain as provided by Pencil; the plugin does not hide them using CSS, DOM injection or overlays.
-
-The plugin's header lists all participating agents and marks those with requests in flight. Updates use the shared session channel. The plugin does not currently assign distinct native canvas cursors or object labels to individual agents. Its header badge is separate from any presence features provided by Pencil.
-
-## Persistence and safeguards
-
-Automatic editor saves keep a separate local draft. A snapshot only confirms mutations whose responses had already completed when the storage message arrived. An earlier snapshot remains `check-required`, even if its disk write finishes later; explicit Save flushes the current engine state. To update the opened `.pen` file, click **Enregistrer** in the plugin header, or have the agent call `pencil_save` with its participation token. Save asks the engine to flush its current content before publishing the draft to the source path. `pencil_status` reports `source-saved` after a successful explicit Save.
-
-Save checks the source revision recorded when the draft was loaded. This baseline survives editor reloads and service restarts. An existing external change blocks Save; the latest draft remains available through `pencil_save_as` at a new path. Drafts from older plugin versions without a recorded baseline also require Save As.
-
-Each source update retains the previous file in a hidden `.pencil-save-*` recovery directory beside the document. Publication preserves the displaced file and refuses to replace a competing file created at the source path. Node does not provide a portable filesystem compare-and-swap: the source path is briefly absent during publication. This is not a fully atomic transaction with independent writers or a crash-durable database. Avoid editing the same file in another application while saving; after an interrupted save, inspect `previous.pen` and `pending.pen` in the recovery directory before removing it. Open file handles held by another process can still write to the retained previous inode.
-
-Save is available once outstanding operations have finished; calling it earlier returns `SAVE_NOT_READY`. Calls received during the flush and publication wait for Save to finish, then resume concurrently. Waiting is bounded to five seconds by default; a failed Save rejects its waiting calls with the same error, and a wait timeout returns `SAVE_WAIT_TIMEOUT` without dispatching the call. No edit queue is used outside Save. Idle agents can remain joined. The header button is disabled while requests or a Save are in progress; joining the session alone does not disable it. Save As continues to write a new destination without switching the active session to that copy.
-
-Assets are limited to `images/` and `fonts/` beside the document. Traversal paths, symbolic links and `.pen` documents used as assets are rejected. External `.pen` libraries are not supported by this initial storage implementation. The editor's document-library/dashboard requests, including `documents-list`, are not implemented either; use the plugin tools to open or create documents.
-
-Agents must coordinate ownership of frames or nodes; the plugin does not merge conflicting edits to the same object. Calls have distinct request IDs and are forwarded immediately without a plugin-wide queue. The hosted engine still executes synchronous JavaScript on its event loop, so concurrent requests do not imply parallel CPU execution. Avoid simultaneous edits to the same nodes, including manual edits in the editor. A timed-out operation blocks subsequent mutations; never replay an insertion with an unknown outcome. Asynchronous generation is unsupported. The syntactic rejection of `Generate(...)` is a usage guard, not a JavaScript sandbox.
-
-## Local data and service lifecycle
-
-When supplied by the host, `PLUGIN_DATA` stores private connection metadata and drafts. Otherwise, the plugin uses its own `.runtime/` directory. The service listens only on loopback and requires a private token. Each editor view receives a token restricted to its session.
-
-The service survives an MCP client disconnect. To stop it explicitly, read its PID from the data directory's `connection.json` and send SIGTERM. Preserve any drafts you still need. After an interrupted startup, a stale `starting` directory may need to be removed after checking that its service is no longer running.
-
-No API key is bundled. Session tokens are generated at runtime. Documents and drafts are stored locally, but their contents are processed by the hosted web editor. Review pen.dev's terms and network behavior before using sensitive documents.
+Read [historical native panel measurements](docs/installed-validation.md), [the former Pen Remote validation report](docs/remote-renderer-experiment.md) and [the feasibility study](docs/persistent-engine-feasibility.md) for their stated versions and limits. The old main remains on `archive/pre-persistent-pencil-2026-11-17`; the saved Remote code remains on `archive/pen-remote-0.1.5-2026-11-17`.
 
 ## References and license
 
-Read [the upstream embed proposal](https://github.com/highagency/pen-embed-demo) for the bridge and [the OpenAI plugin packaging documentation](https://developers.openai.com/plugins/build/plugins) for the package format.
-
-This is an independent integration, not affiliated with or endorsed by Pencil or OpenAI. Read [the MIT license](LICENSE) for this integration and [the third-party notices](THIRD-PARTY-NOTICES.md) for libraries included in the bundles. The hosted Pencil engine remains subject to its publisher's terms.
+Read [the upstream embed proposal](https://github.com/highagency/pen-embed-demo) and [OpenAI plugin packaging documentation](https://developers.openai.com/plugins/build/plugins) for their integration contracts. This is an independent integration, not affiliated with or endorsed by Pencil or OpenAI. Read [the MIT license](LICENSE) and [third-party notices](THIRD-PARTY-NOTICES.md). The hosted engine is not redistributed and remains subject to its publisher’s terms. Documents are stored locally but processed by that hosted editor.

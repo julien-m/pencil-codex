@@ -37,7 +37,7 @@ The first probe creates disposable files and private view links in `<runtime>/pr
 
 For interactive verification, open A's private `viewURL` in an agent-owned browser. Import `runUIProbe` from [the UI probe](../src/persistent/ui-probe.mjs) and pass its page, parsed connection/probe objects and a receipt path. It derives a click target from rendered pixels, nudges the selected object, verifies the changed engine coordinate, changes its color through an agent call, waits for that color in the image and saves through the view.
 
-The opt-in stdio MCP entrypoint is [the experimental adapter](../src/persistent/mcp.mjs):
+The former experiment’s adapter is now [the canonical persistent adapter](../src/persistent/mcp.mjs):
 
 ```bash
 PENCIL_REMOTE_CONNECTION=<absolute-runtime>/connection.json node src/persistent/mcp.mjs
