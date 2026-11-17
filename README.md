@@ -80,7 +80,7 @@ Read [the plugin skill](skills/pencil/SKILL.md). `.pen` contents are opaque: edi
 | `pencil_capture` | Writes PNG captures of requested node IDs |
 | `pencil_export` | Exports PNG, JPEG, WEBP, PDF, HTML/CSS or HTML/Tailwind |
 
-Destination directories must exist. New documents, Save As, captures and exports never overwrite an existing destination. These operations require the appropriate participation lease. The native view’s **Save document** button also saves the source.
+Destination directories must exist. New documents, Save As, captures and exports never overwrite an existing destination. These operations require the appropriate participation lease. With the editor view focused, **Cmd+S** or **Ctrl+S** also flushes and saves the source. Success appears briefly over the editor; errors remain visible. The integration adds no persistent toolbar.
 
 Autosave keeps a separate private draft. An older snapshot cannot acknowledge a later completed mutation. Explicit Save flushes the engine, checks its source baseline and returns `source-saved` after publication. External changes produce `SAVE_CONFLICT`; preserve work with Save As. Older drafts without a baseline also require Save As.
 
@@ -90,7 +90,9 @@ Save requires quiescent operations. Calls arriving during Save wait within a bou
 
 ## Views, accessibility and diagnostics
 
-The view transports images, pointer and keyboard input through the MCP Apps host bridge. It declares no direct external connection domain. Keyboard focus and a visible status are provided, but screen-reader access to editor objects is not available through this image-based view.
+The view transports images, pointer and keyboard input through the MCP Apps host bridge. It declares no direct external connection domain. The same engine adapts to the panel's measured content area, without reloading its document or altering canvas zoom. The first visible view owns its session's size until hidden or disconnected; simultaneous mirrors fit that viewport without competing to resize it. Hidden or zero-size views retain the last valid size when no other view is visible. Dimensions are bounded to 4096 pixels per axis and 8 megapixels; oversized panels are scaled proportionally.
+
+Resize and input share a per-session queue. Stale frame coordinates are rejected and held interactions are released before geometry changes. Keyboard focus and an accessible status are provided; connection/errors overlay the editor and normal connected status is visually hidden. Screen-reader access to editor objects is not available through this image-based view.
 
 `pencil_status` reports readiness, renderer identity, participants, active/waiting calls, Save state, cached metadata and bounded request timestamps. Activity is reported through tools; the view does not currently display a per-agent activity list or distinct agent canvas cursors. The core readiness wait defaults to 60 seconds; opening also includes the renderer’s bounded startup checks. An offline service leaves tool discovery available and returns an error without replaying operations.
 
@@ -101,9 +103,12 @@ bun install --frozen-lockfile
 bun run build
 bun run test
 bun run test:protocol
+bun run test:viewport
 ```
 
 The build produces `dist/pencil.mjs`, `dist/persistent-service.mjs`, the `dist/persistent/` assets and license notices. Legacy panel/server bundles remain for compatibility tests and historical tooling; the installed manifest does not select them. `bun run preview` is a legacy development harness with its own broker, not the installed persistent service.
+
+The opt-in `test:viewport` acceptance check starts its own ephemeral service, private runtime, browser and temporary documents against the real hosted editor. Set `PENCIL_TEST_CHROME` to the Chrome executable outside the default macOS location. It verifies portrait/landscape sizing, Save shortcuts and conflicts, two agents sharing one document, another isolated document, and panel hide/reopen. It leaves captures and a receipt in `.runtime/viewport-evidence/` (override with `PENCIL_VIEWPORT_EVIDENCE`) and removes its service/documents. It does not install the plugin or exercise the native Codex host. Unit tests run sequentially across Node test files to avoid startup process contention without increasing their two-second timeout.
 
 The installed 0.7.1 adapter and real hosted engine passed modification, close and explicit reopen with exact content/UUID-variable preservation, intentional terminal transport shutdown and another renderer remaining intact. All probe editors were then closed. These checks use the installed MCP adapter and actual image transport; they do not certify fresh native Codex UI rendering of 0.7.1.
 

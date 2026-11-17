@@ -24215,7 +24215,15 @@ var inputSchema = external_exports.discriminatedUnion("type", [
   external_exports.object({ type: external_exports.literal("wheel"), deltaX: external_exports.number().min(-2e3).max(2e3), deltaY: external_exports.number().min(-2e3).max(2e3), ...point }).strict()
 ]);
 
+// src/persistent/point.mjs
+var MAX_VIEWPORT_EDGE = 4096;
+var MAX_VIEWPORT_PIXELS = 8388608;
+
 // src/persistent/renderer.mjs
+var viewportSchema = external_exports.discriminatedUnion("visible", [
+  external_exports.object({ visible: external_exports.literal(false) }).strict(),
+  external_exports.object({ visible: external_exports.literal(true), width: external_exports.number().int().min(1).max(MAX_VIEWPORT_EDGE), height: external_exports.number().int().min(1).max(MAX_VIEWPORT_EDGE) }).strict().refine((size) => size.width * size.height <= MAX_VIEWPORT_PIXELS, "Viewport exceeds pixel budget")
+]);
 var RendererHost = class {
   constructor({ executablePath, origin, brokerPort, viewport = { width: 1280, height: 800 } }) {
     this.options = { executablePath, origin, brokerPort, viewport };
@@ -24247,7 +24255,7 @@ var RendererHost = class {
     const context = await browser.newContext({ viewport: this.options.viewport });
     const page = await context.newPage();
     page.setDefaultTimeout(1e4);
-    const state = { id: randomUUID4(), sessionId, context, page, viewers: /* @__PURE__ */ new Set(), frame: null, frameNumber: 0, inputTail: Promise.resolve(), pendingInputs: 0, streaming: false, controller: null, keys: /* @__PURE__ */ new Set(), buttons: /* @__PURE__ */ new Set() };
+    const state = { id: randomUUID4(), sessionId, context, page, viewport: { ...this.options.viewport }, viewportRevision: 0, viewportOwner: null, resizing: false, viewers: /* @__PURE__ */ new Set(), frame: null, frameNumber: 0, inputTail: Promise.resolve(), pendingInputs: 0, streaming: false, controller: null, keys: /* @__PURE__ */ new Set(), buttons: /* @__PURE__ */ new Set() };
     try {
       const hash3 = new URLSearchParams({ session: sessionId, token, brokerPort: String(this.options.brokerPort) });
       await page.goto(`${this.options.origin}/engine#${hash3}`, { timeout: 3e4 });
@@ -24258,7 +24266,7 @@ var RendererHost = class {
       cdp.on("Page.screencastFrame", (event) => {
         void cdp.send("Page.screencastFrameAck", { sessionId: event.sessionId }).catch(() => {
         });
-        this.publish(state, event.data);
+        if (!state.resizing && event.metadata.deviceWidth === state.viewport.width && event.metadata.deviceHeight === state.viewport.height) this.publish(state, event.data);
       });
       return state;
     } catch (error62) {
@@ -24267,12 +24275,13 @@ var RendererHost = class {
     }
   }
   publish(state, data) {
-    state.frame = { kind: "frame", rendererId: state.id, id: ++state.frameNumber, width: this.options.viewport.width, height: this.options.viewport.height, data };
+    state.frame = { kind: "frame", rendererId: state.id, id: ++state.frameNumber, ...state.viewport, viewportRevision: state.viewportRevision, data };
     for (const viewer of state.viewers) this.sendFrame(state, viewer);
   }
   sendFrame(state, viewer) {
     if (!state.frame || viewer.pendingFrame || viewer.lastFrame === state.frame.id || viewer.socket.readyState !== 1) return;
     viewer.pendingFrame = state.frame.id;
+    viewer.pendingRevision = state.frame.viewportRevision;
     viewer.socket.send(JSON.stringify(state.frame));
   }
   async watch(sessionId, socket) {
@@ -24283,22 +24292,25 @@ var RendererHost = class {
     state.viewers.add(viewer);
     if (!state.streaming) {
       state.streaming = true;
-      await state.cdp.send("Page.startScreencast", { format: "jpeg", quality: 75, maxWidth: this.options.viewport.width, maxHeight: this.options.viewport.height });
+      await state.cdp.send("Page.startScreencast", { format: "jpeg", quality: 75, maxWidth: state.viewport.width, maxHeight: state.viewport.height });
     }
     this.publish(state, (await state.page.screenshot({ type: "jpeg", quality: 75, timeout: 1e4 })).toString("base64"));
     return {
-      input: (value) => this.input(sessionId, value, viewer),
+      input: (value, revision) => this.input(sessionId, value, viewer, revision),
+      resize: (value) => this.resize(sessionId, value, viewer),
       cancelInput: () => this.cancelInput(sessionId, viewer),
       acknowledge: (id) => {
         if (viewer.pendingFrame !== id) return;
         viewer.lastFrame = id;
         viewer.pendingFrame = 0;
+        viewer.viewportRevision = viewer.pendingRevision;
         this.sendFrame(state, viewer);
       },
       close: async () => {
         viewer.closed = true;
         state.viewers.delete(viewer);
         await this.cancelInput(sessionId, viewer);
+        await this.resize(sessionId, { visible: false }, viewer);
         if (!state.viewers.size && state.streaming) {
           state.streaming = false;
           await state.cdp.send("Page.stopScreencast").catch(() => {
@@ -24307,7 +24319,7 @@ var RendererHost = class {
       }
     };
   }
-  async input(sessionId, value, viewer) {
+  async input(sessionId, value, viewer, revision) {
     const input2 = inputSchema.parse(value);
     const state = await this.sessions.get(sessionId);
     if (!state) throw new Error("Renderer not found");
@@ -24316,9 +24328,10 @@ var RendererHost = class {
     state.pendingInputs++;
     const run = state.inputTail.then(async () => {
       if (viewer.closed) throw new Error("View disconnected before input dispatch");
+      if (state.viewportRevision !== void 0 && (revision ?? viewer.viewportRevision ?? 0) !== state.viewportRevision) throw new Error("VIEWPORT_CHANGED");
       if (state.controller !== viewer.id && (state.keys.size || state.buttons.size)) throw new Error("Another view is completing an interaction");
       state.controller = viewer.id;
-      const page = state.page, viewport = this.options.viewport;
+      const page = state.page, viewport = state.viewport ?? this.options.viewport;
       if (input2.type === "pointer" || input2.type === "wheel") {
         await page.mouse.move(input2.x * viewport.width, input2.y * viewport.height);
         if (input2.type === "wheel") await page.mouse.wheel(input2.deltaX, input2.deltaY);
@@ -24340,6 +24353,43 @@ var RendererHost = class {
     } finally {
       state.pendingInputs--;
     }
+  }
+  /** The first visible view owns geometry until it hides or disconnects; mirrors never fight it. */
+  async resize(sessionId, value, viewer) {
+    const size = viewportSchema.parse(value);
+    const state = await this.sessions.get(sessionId);
+    if (!state) throw new Error("SESSION_CLOSING");
+    if (viewer.closed && size.visible) return;
+    viewer.viewport = size;
+    const run = state.inputTail.then(async () => {
+      if (state.closing) return;
+      let owner = [...state.viewers].find((candidate) => candidate.id === state.viewportOwner && !candidate.closed && candidate.viewport?.visible);
+      owner ??= [...state.viewers].find((candidate) => !candidate.closed && candidate.viewport?.visible);
+      state.viewportOwner = owner?.id ?? null;
+      if (!owner) return;
+      const { width, height } = owner.viewport;
+      if (state.viewport.width === width && state.viewport.height === height) return;
+      for (const key of state.keys) await state.page.keyboard.up(key);
+      for (const button of state.buttons) await state.page.mouse.up({ button });
+      state.keys.clear();
+      state.buttons.clear();
+      state.controller = null;
+      state.resizing = true;
+      try {
+        if (state.streaming) await state.cdp.send("Page.stopScreencast");
+        await state.page.setViewportSize({ width, height });
+        state.viewport = { width, height };
+        state.viewportRevision++;
+        state.frame = null;
+        this.publish(state, (await state.page.screenshot({ type: "jpeg", quality: 75, timeout: 1e4 })).toString("base64"));
+      } finally {
+        state.resizing = false;
+        if (state.streaming) await state.cdp.send("Page.startScreencast", { format: "jpeg", quality: 75, maxWidth: state.viewport.width, maxHeight: state.viewport.height });
+      }
+    });
+    state.inputTail = run.catch(() => {
+    });
+    return run;
   }
   async cancelInput(sessionId, viewer) {
     const state = await this.sessions.get(sessionId);
@@ -24374,7 +24424,10 @@ var RendererHost = class {
   }
   async resume(sessionId) {
     const state = await this.sessions.get(sessionId);
-    if (state) state.closing = false;
+    if (!state) return;
+    state.closing = false;
+    const viewer = [...state.viewers].find((candidate) => !candidate.closed && candidate.viewport?.visible);
+    if (viewer) await this.resize(sessionId, viewer.viewport, viewer);
   }
   /** Release one context and its viewers, retaining the shared browser and other contexts. */
   async closeSession(sessionId) {
@@ -24426,9 +24479,10 @@ function attachViewChannel(peer, watchReady, onSave) {
       if (peer.readyState !== 1) return;
       if (message.kind === "frame-ack") watch.acknowledge(message.id);
       else if (message.kind === "input") {
-        await watch.input(message.input);
+        await watch.input(message.input, message.viewportRevision);
         send({ kind: "input-result", id: message.id });
-      } else if (message.kind === "cancel-input") await watch.cancelInput();
+      } else if (message.kind === "resize") await watch.resize(message.viewport);
+      else if (message.kind === "cancel-input") await watch.cancelInput();
       else if (message.kind === "save") {
         await watch.cancelInput();
         await onSave();

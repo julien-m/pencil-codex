@@ -10,7 +10,8 @@ export function attachViewChannel(peer, watchReady, onSave) {
       const message = JSON.parse(bytes.toString()), watch = await watchReady;
       if (peer.readyState !== 1) return;
       if (message.kind === 'frame-ack') watch.acknowledge(message.id);
-      else if (message.kind === 'input') { await watch.input(message.input); send({ kind: 'input-result', id: message.id }); }
+      else if (message.kind === 'input') { await watch.input(message.input, message.viewportRevision); send({ kind: 'input-result', id: message.id }); }
+      else if (message.kind === 'resize') await watch.resize(message.viewport);
       else if (message.kind === 'cancel-input') await watch.cancelInput();
       else if (message.kind === 'save') { await watch.cancelInput(); await onSave(); send({ kind: 'saved' }); }
       else throw new Error('Unsupported view message');

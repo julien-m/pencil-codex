@@ -25,7 +25,8 @@ test('a new open result and automatic service recovery each display the replacem
     if (key === 'rendererId' && value === recoveryEditor?.sessionId) renderedRecovery.resolve();
     return true;
   } }), addEventListener() {}, async decode() {}, removeAttribute(name) { delete this[name]; } };
-  const status = { textContent: 'Connecting…' }, button = { addEventListener() {} };
+  const status = { textContent: 'Connecting…', toggleAttribute() {} };
+  const viewport = { getBoundingClientRect: () => ({ width: 800, height: 900 }) };
   let app;
   class HostApp {
     constructor() { app = this; }
@@ -59,7 +60,8 @@ test('a new open result and automatic service recovery each display the replacem
   }
   new Script(bundle.outputFiles[0].text).runInContext(createContext({
     HostApp, crypto: webcrypto, window: { pencilRemoteApp: true }, location: { hash: '' }, URLSearchParams, setTimeout, clearTimeout, AbortController, AbortSignal,
-    document: { querySelector: selector => selector === 'img' ? image : selector === 'button' ? button : status },
+    ResizeObserver: class { observe() {} disconnect() {} },
+    document: { querySelector: selector => selector === 'img' ? image : selector === 'main' ? viewport : status, addEventListener() {}, removeEventListener() {} },
   }));
   try {
     await setImmediate();
@@ -80,11 +82,10 @@ test('a new open result and automatic service recovery each display the replacem
     assert.equal(image.dataset.rendererId, recoveryEditor.sessionId);
     assert.deepEqual(connected, [...editors, recoveryEditor].map(editor => editor.sessionId));
     assert.equal(status.textContent, 'Connected');
-    assert.equal(button.disabled, false);
     const ended = [...channels.values()].at(-1);
     ended.pending.resolve({ structuredContent: { messages: encodeMessage({ kind: 'session-closed' }) } });
     await setImmediate();
-    assert.equal(status.textContent, 'Session closed'); assert.equal(button.disabled, true);
+    assert.equal(status.textContent, 'Session closed');
     assert.equal(image.src, undefined);
   } finally { await app.onteardown(); }
 });

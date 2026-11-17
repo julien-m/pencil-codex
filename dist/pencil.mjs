@@ -40530,7 +40530,7 @@ async function readConnection() {
   return { origin: origin.origin, token: connection.token };
 }
 var server = new McpServer({ name: "pencil", version: "0.7.1" });
-var resource = "ui://pencil/editor-v7.html";
+var resource = "ui://pencil/editor-v8.html";
 var relay;
 var object3 = (result) => ({ content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result });
 var wrap = (fn) => async (args) => {
