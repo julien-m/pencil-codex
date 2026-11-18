@@ -40529,7 +40529,7 @@ async function readConnection() {
   if (origin.protocol !== "http:" || origin.hostname !== "127.0.0.1" || !origin.port || origin.username || origin.password) throw new Error("Pencil requires a local supervised service");
   return { origin: origin.origin, token: connection.token };
 }
-var server = new McpServer({ name: "pencil", version: "0.7.1" });
+var server = new McpServer({ name: "pencil", version: "0.7.2" });
 var resource = "ui://pencil/editor-v8.html";
 var relay;
 var object3 = (result) => ({ content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result });

@@ -1,6 +1,6 @@
 # Pencil for Codex
 
-Pencil **0.7.1** opens opaque `.pen` documents in a native Codex view backed by a persistent hosted Pen editor. The implementation is now on `main` under the existing `pencil@pencil` identity. Pen Remote is no longer a separate plugin.
+Pencil **0.7.2** opens opaque `.pen` documents in a native Codex view backed by a persistent hosted Pen editor. The implementation is now on `main` under the existing `pencil@pencil` identity. Pen Remote is no longer a separate plugin.
 
 The [Claude Code version](https://github.com/julien-m/pencil-claude) is maintained in its own repository. Both use a persistent renderer; the Claude version additionally exposes its selection and local document catalog tools.
 

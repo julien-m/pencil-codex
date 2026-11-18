@@ -100,7 +100,7 @@ image.addEventListener('blur', () => { heldKeys.clear(); send({ kind: 'cancel-in
 async function boot() {
   if (window.pencilRemoteApp) {
     const [{ App }, { createMcpTransport }] = await Promise.all([import('@modelcontextprotocol/ext-apps'), import('../../web/mcp-transport.mjs')]);
-    const app = new App({ name: 'Pencil', version: '0.7.1' }, { availableDisplayModes: ['fullscreen'] });
+    const app = new App({ name: 'Pencil', version: '0.7.2' }, { availableDisplayModes: ['fullscreen'] });
     const showEditor = async editor => {
       if (tearingDown || (socket && socket.readyState !== 3 && currentEditor?.sessionId === editor.sessionId && currentEditor?.editorToken === editor.editorToken)) return;
       // Close the previous channel before replacement; ignore its late frames/errors.
