@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, rm, mkdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, mkdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
@@ -19,8 +19,12 @@ test('hosted editor fills its panel, saves through the view and preserves shared
   await new Promise(resolve => reservation.close(resolve));
   const executablePath = process.env.PENCIL_TEST_CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
   let service, browser;
+  const openedPaths = [];
   try {
-    service = await startRemoteExperiment({ port, executablePath, runtimeDirectory: runtime });
+    service = await startRemoteExperiment({ port, executablePath, runtimeDirectory: runtime, openNative: async save => {
+      const saved = await save();
+      openedPaths.push(saved.path);
+    } });
     browser = await chromium.launch({ executablePath, headless: true, chromiumSandbox: true });
     const rpc = async (method, args = {}) => {
       const response = await fetch(`${service.origin}/rpc`, { method: 'POST', headers: { authorization: `Bearer ${service.token}` }, body: JSON.stringify({ method, args }), signal: AbortSignal.timeout(65_000) });
@@ -30,6 +34,12 @@ test('hosted editor fills its panel, saves through the view and preserves shared
     };
     const files = ['shared.pen', 'isolated.pen'].map(name => path.join(runtime, name));
     const [a, b] = await Promise.all(files.map(file => rpc('new', { path: file, scope: randomUUID() })));
+    for (const session of [a, b]) {
+      const renderer = await service.renderer.sessions.get(session.sessionId);
+      const editor = renderer.page.frames().find(frame => frame.url().startsWith('https://app.pen.dev/'));
+      assert.equal(await editor.evaluate(() => localStorage.getItem('pencil-cookie-consent')), 'declined');
+      assert.equal(await editor.getByRole('button', { name: /^(Decline|Refuser)$/ }).count(), 0);
+    }
     const [one, two, other] = await Promise.all([
       rpc('acquire', { sessionId: a.sessionId, agent: 'one' }), rpc('acquire', { sessionId: a.sessionId, agent: 'two' }), rpc('acquire', { sessionId: b.sessionId, agent: 'other' }),
     ]);
@@ -46,12 +56,14 @@ test('hosted editor fills its panel, saves through the view and preserves shared
     const shared = await execute(a, one, 'Print(GetVariables());'), isolated = await execute(b, other, 'Print(GetVariables());');
     assert(challenges.slice(0, 2).every(value => shared.includes(value)) && !shared.includes(challenges[2]));
     assert(isolated.includes(challenges[2]) && challenges.slice(0, 2).every(value => !isolated.includes(value)));
-    const view = await browser.newPage({ viewport: { width: 806, height: 939 } });
+    await execute(a, one, `Insert(document,{type:'frame',name:${JSON.stringify(challenges[0])},width:240,height:160,fill:'#7c3aed'});`);
+    const view = await browser.newPage({ locale: 'en-US', viewport: { width: 806, height: 939 } });
     view.setDefaultTimeout(10_000);
     const errors = []; view.on('pageerror', error => errors.push(error.message));
     await view.goto(a.viewURL);
     const state = await service.renderer.sessions.get(a.sessionId), otherState = await service.renderer.sessions.get(b.sessionId);
     const rendererId = state.id, otherSize = { ...otherState.viewport };
+    const openInPencil = view.getByRole('button', { name: 'Open in Pencil', exact: true });
     const waitSize = async size => {
       await view.waitForFunction(size => {
         const image = document.querySelector('img'), rect = image.getBoundingClientRect();
@@ -60,7 +72,18 @@ test('hosted editor fills its panel, saves through the view and preserves shared
       assert.deepEqual(state.page.viewportSize(), size);
       assert.equal(state.id, rendererId);
       assert.equal(await view.locator('header,button[data-testid="remote-save-document"]').count(), 0);
+      assert.equal(await openInPencil.textContent(), '↗');
+      const button = await openInPencil.boundingBox();
+      const editMode = await view.getByRole('button', { name: 'Edit', exact: true }).boundingBox();
+      assert.equal(button.y, editMode.y);
+      assert(button.x >= editMode.x + editMode.width && button.x + button.width <= size.width);
+      const controls = await view.locator('.view-controls').boundingBox();
+      assert.equal(size.height - controls.y - controls.height, size.width <= 479 ? 48 : 4);
     };
+    await waitSize({ width: 806, height: 939 });
+    await view.setViewportSize({ width: 320, height: 500 });
+    await waitSize({ width: 320, height: 500 });
+    await view.setViewportSize({ width: 806, height: 939 });
     await waitSize({ width: 806, height: 939 });
     await view.screenshot({ path: path.join(output, 'portrait.png') });
     await view.setViewportSize({ width: 1440, height: 720 });
@@ -68,7 +91,37 @@ test('hosted editor fills its panel, saves through the view and preserves shared
     assert.deepEqual(otherState.viewport, otherSize);
     // Derive the pointer position from the rendered surface rather than canvas node fixtures.
     const box = await view.getByTestId('remote-editor-image').boundingBox();
-    await view.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    const hand = view.locator('[data-control=hand]'), edit = view.locator('[data-control=edit]');
+    const canvas = view.getByTestId('remote-editor-image');
+    assert.equal(await hand.getAttribute('aria-pressed'), 'true');
+    const frame = state.page.frames().find(candidate => candidate.url().startsWith('https://app.pen.dev/'));
+    const surface = frame.locator('[data-pencil-canvas-container="true"]');
+    await surface.evaluate(node => {
+      window.navigationEvents = [];
+      for (const type of ['wheel', 'pointerdown', 'keydown', 'paste']) node.addEventListener(type, event => {
+        window.navigationEvents.push({ type, deltaX: event.deltaX, deltaY: event.deltaY, zoom: event.ctrlKey });
+      }, true);
+    });
+    const beforePan = await surface.screenshot();
+    await view.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await view.mouse.down(); await view.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.6); await view.mouse.up();
+    await view.keyboard.press('Delete');
+    await frame.waitForFunction(() => window.navigationEvents.some(event => !event.zoom));
+    const afterPan = await surface.screenshot();
+    assert.notDeepEqual(afterPan, beforePan, 'Hand drag changed the rendered camera');
+    await view.locator('[data-control=zoomIn]').click();
+    await frame.waitForFunction(() => window.navigationEvents.some(event => event.zoom && event.deltaY < 0));
+    assert.notDeepEqual(await surface.screenshot(), afterPan, 'Zoom changed the rendered camera');
+    const navigationEvents = await frame.evaluate(() => window.navigationEvents);
+    assert(navigationEvents.some(event => !event.zoom && event.deltaX < 0 && event.deltaY < 0));
+    assert(navigationEvents.every(event => event.type === 'wheel'));
+    await openInPencil.click();
+    await view.waitForFunction(() => !document.querySelector('[data-control=openNative]').disabled);
+    assert.equal(await view.locator('[role=status]').textContent(), 'Open request sent to Pencil');
+    assert.deepEqual(openedPaths, [await realpath(files[0])]);
+    await edit.click();
+    assert.equal(await hand.getAttribute('aria-pressed'), 'false');
+    await canvas.focus();
     await view.keyboard.press('Control+s');
     await view.waitForFunction(() => document.querySelector('[role=status]').textContent === 'Document saved');
     assert.equal((await rpc('status', { sessionId: a.sessionId })).saveState, 'source-saved');
@@ -86,7 +139,7 @@ test('hosted editor fills its panel, saves through the view and preserves shared
     await view.setViewportSize({ width: 806, height: 939 }); await waitSize({ width: 806, height: 939 });
     assert((await execute(a, one, 'Print(GetVariables());')).includes(background));
     await view.close();
-    const reopened = await browser.newPage({ viewport: { width: 1000, height: 800 } });
+    const reopened = await browser.newPage({ locale: 'en-US', viewport: { width: 1000, height: 800 } });
     await reopened.goto(a.viewURL);
     await reopened.waitForFunction(() => document.querySelector('img').naturalWidth === 1000 && document.querySelector('img').naturalHeight === 800);
     assert.equal(state.id, rendererId);
@@ -101,9 +154,10 @@ test('hosted editor fills its panel, saves through the view and preserves shared
     const restoredAgent = await rpc('acquire', { sessionId: restored.sessionId, agent: 'restored' });
     const restoredVariables = await execute(restored, restoredAgent, 'Print(GetVariables());');
     assert([...challenges.slice(0, 2), background].every(value => restoredVariables.includes(value)));
-    const conflictView = await browser.newPage({ viewport: { width: 806, height: 939 } });
+    const conflictView = await browser.newPage({ locale: 'en-US', viewport: { width: 806, height: 939 } });
     await conflictView.goto(restored.viewURL);
     await conflictView.waitForFunction(() => !!document.querySelector('img').dataset.frameId);
+    await conflictView.locator('[data-control=edit]').click();
     await conflictView.getByTestId('remote-editor-image').focus();
     const external = await readFile(files[1]);
     await writeFile(files[0], external);
@@ -113,6 +167,9 @@ test('hosted editor fills its panel, saves through the view and preserves shared
       return !status.hasAttribute('data-quiet') && status.textContent.includes('chang');
     });
     assert.deepEqual(await readFile(files[0]), external);
+    await conflictView.locator('[data-control=openNative]').click();
+    await conflictView.waitForFunction(() => !document.querySelector('[data-control=openNative]').disabled && document.querySelector('[role=status]').textContent.includes('changé'));
+    assert.deepEqual(openedPaths, [await realpath(files[0])]);
     // The intentionally conflicted disposable editor is retained until service teardown.
     await rpc('close', { sessionId: b.sessionId, lease: other.lease });
     await writeFile(path.join(output, 'receipt.json'), JSON.stringify({ status: 'passed', portrait: [806, 939], landscape: [1440, 720], sameRendererAfterResizeAndReopen: true, savedSourceAndRestoredContent: true, conflictPreservedExternalBytes: true, agentsShareDocument: true, sessionsIsolated: true, activePluginTouched: false, surface: 'isolated standalone view using the same view entrypoint; not a native Codex panel' }, null, 2));

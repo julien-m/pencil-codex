@@ -2925,9 +2925,9 @@ var require_websocket = __commonJS({
         emitErrorAndClose(websocket, err);
       });
       req.on("response", (res) => {
-        const location = res.headers.location;
+        const location2 = res.headers.location;
         const statusCode = res.statusCode;
-        if (location && opts.followRedirects && statusCode >= 300 && statusCode < 400) {
+        if (location2 && opts.followRedirects && statusCode >= 300 && statusCode < 400) {
           if (++websocket._redirects > opts.maxRedirects) {
             abortHandshake(websocket, req, "Maximum redirects exceeded");
             return;
@@ -2935,9 +2935,9 @@ var require_websocket = __commonJS({
           req.abort();
           let addr;
           try {
-            addr = new URL2(location, address);
+            addr = new URL2(location2, address);
           } catch (e) {
-            const err = new SyntaxError(`Invalid URL: ${location}`);
+            const err = new SyntaxError(`Invalid URL: ${location2}`);
             emitErrorAndClose(websocket, err);
             return;
           }
@@ -3724,6 +3724,8 @@ var require_websocket_server = __commonJS({
 
 // src/persistent/server.mjs
 import http2 from "node:http";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { randomUUID as randomUUID5, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
 import { readFile as readFile2, mkdir as mkdir3, writeFile as writeFile2, unlink as unlink3 } from "node:fs/promises";
 import path3 from "node:path";
@@ -4488,6 +4490,7 @@ async function startBroker({ token = randomUUID3(), timeout, editorWaitTimeout, 
 // src/persistent/renderer.mjs
 import { chromium } from "playwright-core";
 import { randomUUID as randomUUID4 } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 
 // node_modules/zod/v4/classic/external.js
 var external_exports = {};
@@ -24214,16 +24217,49 @@ var inputSchema = external_exports.discriminatedUnion("type", [
   external_exports.object({ type: external_exports.literal("text"), text: external_exports.string().max(4096) }).strict(),
   external_exports.object({ type: external_exports.literal("wheel"), deltaX: external_exports.number().min(-2e3).max(2e3), deltaY: external_exports.number().min(-2e3).max(2e3), ...point }).strict()
 ]);
+var navigationSchema = external_exports.object({
+  ...point,
+  deltaX: external_exports.number().min(-2e3).max(2e3),
+  deltaY: external_exports.number().min(-2e3).max(2e3),
+  zoom: external_exports.boolean()
+}).strict();
 
 // src/persistent/point.mjs
 var MAX_VIEWPORT_EDGE = 4096;
 var MAX_VIEWPORT_PIXELS = 8388608;
 
 // src/persistent/renderer.mjs
+var FALLBACK_CAPTURE_INTERVAL_MS = 100;
 var viewportSchema = external_exports.discriminatedUnion("visible", [
   external_exports.object({ visible: external_exports.literal(false) }).strict(),
   external_exports.object({ visible: external_exports.literal(true), width: external_exports.number().int().min(1).max(MAX_VIEWPORT_EDGE), height: external_exports.number().int().min(1).max(MAX_VIEWPORT_EDGE) }).strict().refine((size) => size.width * size.height <= MAX_VIEWPORT_PIXELS, "Viewport exceeds pixel budget")
 ]);
+function updateCanvasView({ navigation, clearHover }) {
+  const surface = document.querySelector('[data-pencil-canvas-container="true"]');
+  if (navigation) {
+    if (!surface?.querySelector("canvas")) throw new Error("CANVAS_UNAVAILABLE");
+    const { x, y, deltaX, deltaY, zoom } = navigation;
+    const rect = surface.getBoundingClientRect();
+    surface.dispatchEvent(new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaX,
+      deltaY,
+      ctrlKey: zoom,
+      clientX: rect.left + x * rect.width,
+      clientY: rect.top + y * rect.height
+    }));
+  }
+  if (!clearHover || !surface || !document.body) return;
+  const outsideMove = () => new PointerEvent("pointermove", {
+    bubbles: true,
+    pointerType: "mouse",
+    clientX: -1,
+    clientY: -1
+  });
+  surface.dispatchEvent(outsideMove());
+  document.body.dispatchEvent(outsideMove());
+}
 var RendererHost = class {
   constructor({ executablePath, origin, brokerPort, viewport = { width: 1280, height: 800 } }) {
     this.options = { executablePath, origin, brokerPort, viewport };
@@ -24257,6 +24293,13 @@ var RendererHost = class {
     page.setDefaultTimeout(1e4);
     const state = { id: randomUUID4(), sessionId, context, page, viewport: { ...this.options.viewport }, viewportRevision: 0, viewportOwner: null, resizing: false, viewers: /* @__PURE__ */ new Set(), frame: null, frameNumber: 0, inputTail: Promise.resolve(), pendingInputs: 0, streaming: false, controller: null, keys: /* @__PURE__ */ new Set(), buttons: /* @__PURE__ */ new Set() };
     try {
+      await context.addInitScript(() => {
+        if (location.origin !== "https://app.pen.dev" || location.pathname !== "/new" || !new URLSearchParams(location.search).has("embed")) return;
+        try {
+          localStorage.setItem("pencil-cookie-consent", "declined");
+        } catch {
+        }
+      });
       const hash3 = new URLSearchParams({ session: sessionId, token, brokerPort: String(this.options.brokerPort) });
       await page.goto(`${this.options.origin}/engine#${hash3}`, { timeout: 3e4 });
       await page.waitForFunction(() => window.engineState === "ready", void 0, { timeout: 3e4 });
@@ -24266,7 +24309,7 @@ var RendererHost = class {
       cdp.on("Page.screencastFrame", (event) => {
         void cdp.send("Page.screencastFrameAck", { sessionId: event.sessionId }).catch(() => {
         });
-        if (!state.resizing && event.metadata.deviceWidth === state.viewport.width && event.metadata.deviceHeight === state.viewport.height) this.publish(state, event.data);
+        void this.receiveFrame(state, event);
       });
       return state;
     } catch (error62) {
@@ -24274,8 +24317,45 @@ var RendererHost = class {
       throw error62;
     }
   }
+  /** Keep accurate pointer geometry even when Chrome's compositor reports a different surface size. */
+  async receiveFrame(state, event, followup = false) {
+    const { metadata, data } = event;
+    if (state.resizing || state.closing) return;
+    const { width, height } = state.viewport;
+    if (metadata.deviceWidth === width && metadata.deviceHeight === height) {
+      this.publish(state, data);
+      return;
+    }
+    const active = state.fallbackCapture;
+    if (active) {
+      if (data !== active.event.data) {
+        active.event = event;
+        if (active.capturing) active.dirty = true;
+      }
+      return;
+    }
+    const capture = { event, capturing: false, dirty: false };
+    state.fallbackCapture = capture;
+    let repeat = false;
+    const revision = state.viewportRevision, frame = state.frame;
+    const needsCapture = () => state.streaming && !state.closing && !state.resizing && state.viewportRevision === revision && state.frame === frame && [...state.viewers].some((viewer) => !viewer.closed && viewer.viewport?.visible !== false);
+    try {
+      await delay(FALLBACK_CAPTURE_INTERVAL_MS);
+      if (!needsCapture()) return;
+      capture.capturing = true;
+      const pixels = await state.page.screenshot({ type: "jpeg", quality: 75, timeout: 2e3 });
+      if (!needsCapture()) return;
+      const exactFrame = pixels.toString("base64"), changed = frame?.data !== exactFrame;
+      repeat = capture.dirty && (!followup || changed);
+      if (changed) this.publish(state, exactFrame);
+    } catch {
+    } finally {
+      state.fallbackCapture = null;
+    }
+    if (repeat) void this.receiveFrame(state, capture.event, true);
+  }
   publish(state, data) {
-    state.frame = { kind: "frame", rendererId: state.id, id: ++state.frameNumber, ...state.viewport, viewportRevision: state.viewportRevision, data };
+    state.frame = { kind: "frame", rendererId: state.id, id: ++state.frameNumber, ...state.viewport, viewportRevision: state.viewportRevision, viewControls: true, data };
     for (const viewer of state.viewers) this.sendFrame(state, viewer);
   }
   sendFrame(state, viewer) {
@@ -24297,8 +24377,9 @@ var RendererHost = class {
     this.publish(state, (await state.page.screenshot({ type: "jpeg", quality: 75, timeout: 1e4 })).toString("base64"));
     return {
       input: (value, revision) => this.input(sessionId, value, viewer, revision),
+      navigate: (value, revision) => this.navigate(sessionId, value, viewer, revision),
       resize: (value) => this.resize(sessionId, value, viewer),
-      cancelInput: () => this.cancelInput(sessionId, viewer),
+      cancelInput: (options) => this.cancelInput(sessionId, viewer, options),
       acknowledge: (id) => {
         if (viewer.pendingFrame !== id) return;
         viewer.lastFrame = id;
@@ -24319,21 +24400,23 @@ var RendererHost = class {
       }
     };
   }
+  async navigate(sessionId, value, viewer, revision) {
+    const navigation = navigationSchema.parse(value);
+    return this.withInput(sessionId, viewer, revision, async (state) => {
+      if (state.keys.size || state.buttons.size) return;
+      const frame = state.page.frames().find((candidate) => candidate.url().startsWith("https://app.pen.dev/"));
+      if (!frame) throw new Error("CANVAS_UNAVAILABLE");
+      await frame.evaluate(updateCanvasView, { navigation, clearHover: state.controller === null });
+    });
+  }
   async input(sessionId, value, viewer, revision) {
     const input2 = inputSchema.parse(value);
-    const state = await this.sessions.get(sessionId);
-    if (!state) throw new Error("Renderer not found");
-    if (state.closing) throw new Error("SESSION_CLOSING");
-    if (state.pendingInputs >= 100) throw new Error("Input queue full");
-    state.pendingInputs++;
-    const run = state.inputTail.then(async () => {
-      if (viewer.closed) throw new Error("View disconnected before input dispatch");
-      if (state.viewportRevision !== void 0 && (revision ?? viewer.viewportRevision ?? 0) !== state.viewportRevision) throw new Error("VIEWPORT_CHANGED");
-      if (state.controller !== viewer.id && (state.keys.size || state.buttons.size)) throw new Error("Another view is completing an interaction");
+    return this.withInput(sessionId, viewer, revision, async (state) => {
       state.controller = viewer.id;
       const page = state.page, viewport = state.viewport ?? this.options.viewport;
       if (input2.type === "pointer" || input2.type === "wheel") {
         await page.mouse.move(input2.x * viewport.width, input2.y * viewport.height);
+        state.hasEditorPointer = true;
         if (input2.type === "wheel") await page.mouse.wheel(input2.deltaX, input2.deltaY);
         else if (input2.action !== "move") {
           await page.mouse[input2.action]({ button: input2.button });
@@ -24345,6 +24428,19 @@ var RendererHost = class {
         if (input2.action === "down") state.keys.add(input2.key);
         else state.keys.delete(input2.key);
       } else await page.keyboard.insertText(input2.text);
+    });
+  }
+  async withInput(sessionId, viewer, revision, dispatch) {
+    const state = await this.sessions.get(sessionId);
+    if (!state) throw new Error("Renderer not found");
+    if (state.closing) throw new Error("SESSION_CLOSING");
+    if (state.pendingInputs >= 100) throw new Error("Input queue full");
+    state.pendingInputs++;
+    const run = state.inputTail.then(async () => {
+      if (viewer.closed) throw new Error("View disconnected before input dispatch");
+      if (state.viewportRevision !== void 0 && (revision ?? viewer.viewportRevision ?? 0) !== state.viewportRevision) throw new Error("VIEWPORT_CHANGED");
+      if (state.controller !== viewer.id && (state.keys.size || state.buttons.size)) throw new Error("Another view is completing an interaction");
+      await dispatch(state);
     });
     state.inputTail = run.catch(() => {
     });
@@ -24374,6 +24470,7 @@ var RendererHost = class {
       state.keys.clear();
       state.buttons.clear();
       state.controller = null;
+      await this.clearHover(state);
       state.resizing = true;
       try {
         if (state.streaming) await state.cdp.send("Page.stopScreencast");
@@ -24391,20 +24488,31 @@ var RendererHost = class {
     });
     return run;
   }
-  async cancelInput(sessionId, viewer) {
+  async cancelInput(sessionId, viewer, { enteringHand = false } = {}) {
     const state = await this.sessions.get(sessionId);
     if (!state) return;
     const run = state.inputTail.then(async () => {
-      if (state.controller !== viewer.id) return;
-      for (const key of state.keys) await state.page.keyboard.up(key);
-      for (const button of state.buttons) await state.page.mouse.up({ button });
-      state.keys.clear();
-      state.buttons.clear();
-      state.controller = null;
+      if (state.controller === viewer.id) {
+        for (const key of state.keys) await state.page.keyboard.up(key);
+        for (const button of state.buttons) await state.page.mouse.up({ button });
+        state.keys.clear();
+        state.buttons.clear();
+        state.controller = null;
+        await this.clearHover(state, enteringHand);
+      } else if (enteringHand && state.controller === null) {
+        await this.clearHover(state, true);
+      }
     });
     state.inputTail = run.catch(() => {
     });
     return run;
+  }
+  async clearHover(state, force = false) {
+    if (!force && !state.hasEditorPointer) return;
+    state.hasEditorPointer = false;
+    const frame = state.page.frames().find((candidate) => candidate.url().startsWith("https://app.pen.dev/"));
+    await frame?.evaluate(updateCanvasView, { clearHover: true }).catch(() => {
+    });
   }
   async status(sessionId) {
     const state = await this.sessions.get(sessionId);
@@ -24457,8 +24565,8 @@ var RendererHost = class {
 };
 
 // src/persistent/view-channel.mjs
-function attachViewChannel(peer, watchReady, onSave) {
-  let queued = 0;
+function attachViewChannel(peer, watchReady, onSave, onOpenNative) {
+  let queued = 0, editing = true, opening = false;
   const send = (message) => {
     if (peer.readyState === 1) peer.send(JSON.stringify(message));
   };
@@ -24478,15 +24586,30 @@ function attachViewChannel(peer, watchReady, onSave) {
       const message = JSON.parse(bytes.toString()), watch = await watchReady;
       if (peer.readyState !== 1) return;
       if (message.kind === "frame-ack") watch.acknowledge(message.id);
-      else if (message.kind === "input") {
+      else if (message.kind === "mode" && typeof message.editing === "boolean") {
+        editing = message.editing;
+        if (!editing) await watch.cancelInput({ enteringHand: true });
+      } else if (message.kind === "input" && editing && !opening) {
         await watch.input(message.input, message.viewportRevision);
         send({ kind: "input-result", id: message.id });
-      } else if (message.kind === "resize") await watch.resize(message.viewport);
+      } else if (message.kind === "navigate" && !editing && !opening) await watch.navigate(message.navigation, message.viewportRevision);
+      else if (message.kind === "resize") await watch.resize(message.viewport);
       else if (message.kind === "cancel-input") await watch.cancelInput();
-      else if (message.kind === "save") {
+      else if (message.kind === "save" && editing && !opening) {
         await watch.cancelInput();
         await onSave();
         send({ kind: "saved" });
+      } else if (message.kind === "open-native" && !opening) {
+        opening = true;
+        try {
+          await watch.cancelInput();
+          await onOpenNative(onSave);
+          send({ kind: "native-opened" });
+        } catch (error62) {
+          send({ kind: "native-open-failed", code: error62.code, message: error62.message });
+        } finally {
+          opening = false;
+        }
       } else throw new Error("Unsupported view message");
     } catch (error62) {
       send({ kind: "error", message: error62.message });
@@ -24505,7 +24628,25 @@ var moduleRoot = path3.dirname(fileURLToPath(import.meta.url));
 var root = path3.basename(moduleRoot) === "dist" ? path3.join(moduleRoot, "persistent") : moduleRoot;
 var same2 = (left, right) => typeof left === "string" && Buffer.byteLength(left) === Buffer.byteLength(right) && timingSafeEqual2(Buffer.from(left), Buffer.from(right));
 var assets = /* @__PURE__ */ new Map([["/", ["view.html", "text/html"]], ["/engine", ["engine.html", "text/html"]], ["/view.mjs", ["view.mjs", "text/javascript"]], ["/engine.mjs", ["engine.mjs", "text/javascript"]], ["/point.mjs", ["point.mjs", "text/javascript"]], ["/keyboard.mjs", ["keyboard.mjs", "text/javascript"]]]);
-async function startRemoteExperiment({ port, executablePath, runtimeDirectory }) {
+var exec = promisify(execFile);
+async function openInPen(save) {
+  if (process.platform !== "darwin") throw Object.assign(new Error("Desktop launch requires macOS"), { code: "NATIVE_UNAVAILABLE" });
+  let source;
+  try {
+    ({ path: source } = await save());
+  } catch (error62) {
+    if (error62.code === "EDEADLK" || error62.code === "Unknown system error -11") {
+      throw Object.assign(new Error("The source file is not available locally", { cause: error62 }), { code: "NATIVE_SOURCE_UNAVAILABLE" });
+    }
+    throw error62;
+  }
+  try {
+    await exec("/usr/bin/open", ["-b", "dev.pencil.desktop", source], { timeout: 5e3 });
+  } catch {
+    throw Object.assign(new Error("Launch Services could not open the document in Pen"), { code: "NATIVE_LAUNCH_FAILED" });
+  }
+}
+async function startRemoteExperiment({ port, executablePath, runtimeDirectory, openNative = openInPen }) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("A valid explicit loopback port is required");
   await mkdir3(runtimeDirectory, { recursive: true, mode: 448 });
   const broker = await startBroker({ draftRoot: path3.join(runtimeDirectory, "drafts"), editorLifecycle: {
@@ -24580,11 +24721,11 @@ async function startRemoteExperiment({ port, executablePath, runtimeDirectory })
         await state.inputTail;
         const participant = await rpc("acquire", { sessionId: id, agent: "Remote view save" });
         try {
-          await rpc("save", { sessionId: id, lease: participant.lease });
+          return await rpc("save", { sessionId: id, lease: participant.lease });
         } finally {
           await rpc("release", { sessionId: id, lease: participant.lease });
         }
-      });
+      }, openNative);
     });
   });
   try {

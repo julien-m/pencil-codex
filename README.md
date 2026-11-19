@@ -1,6 +1,6 @@
 # Pencil for Codex
 
-Pencil **0.7.2** opens opaque `.pen` documents in a native Codex view backed by a persistent hosted Pen editor. The implementation is now on `main` under the existing `pencil@pencil` identity. Pen Remote is no longer a separate plugin.
+Pencil **0.7.3** opens opaque `.pen` documents in a native Codex view backed by a persistent hosted Pen editor. The implementation is now on `main` under the existing `pencil@pencil` identity. Pen Remote is no longer a separate plugin.
 
 The [Claude Code version](https://github.com/julien-m/pencil-claude) is maintained in its own repository. Both use a persistent renderer; the Claude version additionally exposes its selection and local document catalog tools.
 
@@ -80,7 +80,9 @@ Read [the plugin skill](skills/pencil/SKILL.md). `.pen` contents are opaque: edi
 | `pencil_capture` | Writes PNG captures of requested node IDs |
 | `pencil_export` | Exports PNG, JPEG, WEBP, PDF, HTML/CSS or HTML/Tailwind |
 
-Destination directories must exist. New documents, Save As, captures and exports never overwrite an existing destination. These operations require the appropriate participation lease. With the editor view focused, **Cmd+S** or **Ctrl+S** also flushes and saves the source. Success appears briefly over the editor; errors remain visible. The integration adds no persistent toolbar.
+Destination directories must exist. New documents, Save As, captures and exports never overwrite an existing destination. These operations require the appropriate participation lease. In **Edit** mode, **Cmd+S** or **Ctrl+S** flushes and saves the source. Success appears briefly over the editor and errors remain visible.
+
+On macOS, the **↗ Open in Pencil** button next to the Hand and Edit controls saves the current document, then opens that same source file in the pen.dev desktop app. A failed Save stops the launch. The Codex panel returns to Hand mode and continues showing its own session. The desktop app and Codex maintain independent editor state. Save in one editor at a time and resolve any source conflict before continuing in Codex.
 
 Autosave keeps a separate private draft. An older snapshot cannot acknowledge a later completed mutation. Explicit Save flushes the engine, checks its source baseline and returns `source-saved` after publication. External changes produce `SAVE_CONFLICT`; preserve work with Save As. Older drafts without a baseline also require Save As.
 
@@ -90,9 +92,13 @@ Save requires quiescent operations. Calls arriving during Save wait within a bou
 
 ## Views, accessibility and diagnostics
 
+Each panel opens in **Hand** mode. Drag the canvas or use the arrow keys to pan. Use the **− / +** buttons, pinch on a compatible trackpad, or hold **Cmd/Ctrl** while scrolling to zoom. Hand mode forwards only canvas navigation. Choose **Edit** to interact with objects or use editing shortcuts. Hand navigation and desktop launch require the updated background service. The switch affects your panel and agents can keep working in the shared session.
+
+The embedded editor starts with pen.dev’s analytics cookie choice set to **Decline** in every fresh browser context.
+
 The view transports images, pointer and keyboard input through the MCP Apps host bridge. It declares no direct external connection domain. The same engine adapts to the panel's measured content area, without reloading its document or altering canvas zoom. The first visible view owns its session's size until hidden or disconnected; simultaneous mirrors fit that viewport without competing to resize it. Hidden or zero-size views retain the last valid size when no other view is visible. Dimensions are bounded to 4096 pixels per axis and 8 megapixels; oversized panels are scaled proportionally.
 
-Resize and input share a per-session queue. Stale frame coordinates are rejected and held interactions are released before geometry changes. Keyboard focus and an accessible status are provided; connection/errors overlay the editor and normal connected status is visually hidden. Screen-reader access to editor objects is not available through this image-based view.
+Resize and input share a per-session queue. Stale frame coordinates are rejected and held interactions are released before geometry changes. If Chrome reports a compositor surface with different dimensions, the view captures a correctly sized image at a limited rate. Keyboard focus and an accessible status are provided; connection/errors overlay the editor and normal connected status is visually hidden. Screen-reader access to editor objects is not available through this image-based view.
 
 `pencil_status` reports readiness, renderer identity, participants, active/waiting calls, Save state, cached metadata and bounded request timestamps. Activity is reported through tools; the view does not currently display a per-agent activity list or distinct agent canvas cursors. The core readiness wait defaults to 60 seconds; opening also includes the renderer’s bounded startup checks. An offline service leaves tool discovery available and returns an error without replaying operations.
 

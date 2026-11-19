@@ -1,4 +1,6 @@
 import http from 'node:http';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { readFile, mkdir, writeFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
@@ -13,8 +15,25 @@ const root = path.basename(moduleRoot) === 'dist' ? path.join(moduleRoot, 'persi
 const same = (left, right) => typeof left === 'string' && Buffer.byteLength(left) === Buffer.byteLength(right) && timingSafeEqual(Buffer.from(left), Buffer.from(right));
 const assets = new Map([['/', ['view.html', 'text/html']], ['/engine', ['engine.html', 'text/html']], ['/view.mjs', ['view.mjs', 'text/javascript']], ['/engine.mjs', ['engine.mjs', 'text/javascript']], ['/point.mjs', ['point.mjs', 'text/javascript']], ['/keyboard.mjs', ['keyboard.mjs', 'text/javascript']]]);
 
+const exec = promisify(execFile);
+
+async function openInPen(save) {
+  if (process.platform !== 'darwin') throw Object.assign(new Error('Desktop launch requires macOS'), { code: 'NATIVE_UNAVAILABLE' });
+  let source;
+  try { ({ path: source } = await save()); }
+  catch (error) {
+    // libuv on macOS can report EDEADLK as an unknown errno when a File Provider item is dataless.
+    if (error.code === 'EDEADLK' || error.code === 'Unknown system error -11') {
+      throw Object.assign(new Error('The source file is not available locally', { cause: error }), { code: 'NATIVE_SOURCE_UNAVAILABLE' });
+    }
+    throw error;
+  }
+  try { await exec('/usr/bin/open', ['-b', 'dev.pencil.desktop', source], { timeout: 5000 }); }
+  catch { throw Object.assign(new Error('Launch Services could not open the document in Pen'), { code: 'NATIVE_LAUNCH_FAILED' }); }
+}
+
 /** Start the supervised Pencil service; editor lifetime is independent of its views. */
-export async function startRemoteExperiment({ port, executablePath, runtimeDirectory }) {
+export async function startRemoteExperiment({ port, executablePath, runtimeDirectory, openNative = openInPen }) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('A valid explicit loopback port is required');
   await mkdir(runtimeDirectory, { recursive: true, mode: 0o700 });
   const broker = await startBroker({ draftRoot: path.join(runtimeDirectory, 'drafts'), editorLifecycle: {
@@ -71,9 +90,9 @@ export async function startRemoteExperiment({ port, executablePath, runtimeDirec
         const state = await renderer.sessions.get(id);
         await state.inputTail;
         const participant = await rpc('acquire', { sessionId: id, agent: 'Remote view save' });
-        try { await rpc('save', { sessionId: id, lease: participant.lease }); }
+        try { return await rpc('save', { sessionId: id, lease: participant.lease }); }
         finally { await rpc('release', { sessionId: id, lease: participant.lease }); }
-      });
+      }, openNative);
     });
   });
   try { await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); }); }

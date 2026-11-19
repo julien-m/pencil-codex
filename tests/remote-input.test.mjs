@@ -33,6 +33,29 @@ test('disconnect cancels held input without letting another viewer release its k
   await host.input(session, { type: 'key', action: 'down', key: 'c' }, other);
   assert.equal(state.controller, other.id);
 });
+test('releasing the editing viewer clears its canvas hover without sending a click', async () => {
+  const host = new RendererHost({}), session = randomUUID(), owner = { id: randomUUID() };
+  const updates = [];
+  const editor = { url: () => 'https://app.pen.dev/new?embed', evaluate: async (_, update) => updates.push(update) };
+  const state = {
+    inputTail: Promise.resolve(), pendingInputs: 0, keys: new Set(), buttons: new Set(),
+    page: { frames: () => [editor], mouse: { async move() {} } },
+  };
+  host.sessions.set(session, Promise.resolve(state));
+  const mirror = { id: randomUUID() };
+  const movement = { x: 0.5, y: 0.5, deltaX: 0, deltaY: 32, zoom: false };
+  await host.input(session, { type: 'pointer', action: 'move', x: 0.5, y: 0.5 }, owner);
+  await host.cancelInput(session, mirror, { enteringHand: true });
+  assert.deepEqual(updates, []);
+  await host.navigate(session, movement, mirror);
+  assert.deepEqual(updates.pop(), { navigation: movement, clearHover: false });
+  await host.cancelInput(session, owner, { enteringHand: true });
+  assert.deepEqual(updates.pop(), { clearHover: true });
+  await host.cancelInput(session, owner);
+  assert.deepEqual(updates, []);
+  await host.navigate(session, movement, owner);
+  assert.deepEqual(updates.pop(), { navigation: movement, clearHover: true });
+});
 test('remote inputs cannot carry script execution or target another document', () => {
   assert(inputSchema.safeParse({ type: 'text', text: 'Hello' }).success);
   assert(!inputSchema.safeParse({ type: 'pointer', action: 'down', x: -1, y: 0.5 }).success);
@@ -66,6 +89,33 @@ test('an image acknowledgement arriving before attachment is retained', async ()
   attached({ acknowledge: id => acknowledgements.push(id), close: async () => {} });
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(acknowledgements, [frameId]);
+});
+test('Hand blocks edits after opt-in while legacy panels can still edit', async () => {
+  const peer = new EventEmitter();
+  peer.readyState = 1;
+  const dispatched = [], replies = [];
+  peer.send = bytes => replies.push(JSON.parse(bytes));
+  attachViewChannel(peer, Promise.resolve({
+    input: async value => dispatched.push(value),
+    cancelInput: async () => {},
+    navigate: async value => dispatched.push(value),
+  }), async () => {});
+  const send = async message => {
+    peer.emit('message', Buffer.from(JSON.stringify(message)));
+    await new Promise(resolve => setImmediate(resolve));
+  };
+  const edit = { kind: 'input', id: randomUUID(), input: { type: 'text', text: randomUUID() } };
+  const navigate = { kind: 'navigate', navigation: { x: 0.5, y: 0.5, deltaX: 8, deltaY: 16, zoom: false } };
+  await send(edit);
+  await send({ kind: 'mode', editing: false });
+  await send(edit);
+  await send({ kind: 'save' });
+  await send(navigate);
+  assert.deepEqual(dispatched, [edit.input, navigate.navigation]);
+  assert.deepEqual(replies.map(message => message.kind), ['input-result', 'error', 'error']);
+  await send({ kind: 'mode', editing: true });
+  await send(edit);
+  assert.deepEqual(dispatched, [edit.input, navigate.navigation, edit.input]);
 });
 test('closing one renderer context releases its cached frame and viewers without closing the shared browser', async () => {
   const { RendererHost } = await import('../src/persistent/renderer.mjs');
