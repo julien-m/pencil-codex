@@ -1,9 +1,38 @@
 <!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pencil</title>
 <style>
 :root{color-scheme:dark}html,body{margin:0;inline-size:100%;block-size:100%;font:14px system-ui;background:#18181b;color:#fafafa}body{display:flex;flex-direction:column;gap:0;padding:0}main{position:relative;display:flex;align-items:stretch;flex:1 1 0;min-inline-size:0;min-block-size:0;gap:0;padding:0}img{display:block;inline-size:100%;block-size:100%;min-inline-size:0;min-block-size:0;object-fit:contain;touch-action:none;user-select:none;-webkit-user-select:none}img:focus-visible{outline:2px solid #7dd3fc;outline-offset:-2px}
-/* Transient feedback overlays the editor; it never reserves a toolbar or changes its viewport. */
+/* Overlay controls preserve the renderer's panel-sized viewport. */
+.view-controls{position:absolute;inset-inline:8px;inset-block-end:4px;display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px;pointer-events:none}
+.view-controls > div{display:flex;align-items:center;gap:4px;padding:4px;border:1px solid #52525b;border-radius:8px;background:#27272a;pointer-events:auto}
+.view-controls [data-label=mode]{display:flex;align-items:center;gap:4px}
+main button{min-block-size:32px;min-inline-size:32px;padding:4px 8px;border:1px solid transparent;border-radius:4px;background:transparent;color:inherit;font:inherit;cursor:pointer}
+main button:hover:not(:disabled){background:#3f3f46}
+.view-controls button[aria-pressed=true]{background:#3f3f46;border-color:#a1a1aa}
+main button:disabled{opacity:.55;cursor:not-allowed}
+main button:focus-visible{outline:2px solid #7dd3fc;outline-offset:-2px}
+main:not([data-editing]) img{cursor:grab}main:not([data-editing]) img[data-dragging]{cursor:grabbing}
+.view-controls [data-control=openNative]{font-size:1.125rem;line-height:1}
+/* Leave the native zoom controls clear when a narrow panel cannot fit both groups on one line. */
+@media (max-width:479px){.view-controls{inset-block-end:48px}}
+@media (pointer:coarse){main button{min-block-size:48px;min-inline-size:48px}}
 [role=status]{position:absolute;inset-block-start:8px;inset-inline-start:8px;max-inline-size:calc(100% - 16px);padding:8px 12px;background:#27272a;border-radius:4px;pointer-events:none}
 [role=status][data-quiet]{inline-size:1px;block-size:1px;inset:0;padding:0;clip-path:inset(50%);white-space:nowrap}
 </style>
-<main aria-label="Pencil editor" data-testid="remote-editor-viewport"><img tabindex="0" data-testid="remote-editor-image" aria-keyshortcuts="Meta+S Control+S" alt="Live Pencil editor. Click to focus, then use the pointer or keyboard. Command or Control S saves the source document. Screen-reader access to editor objects is not available in this view."><span role="status" data-testid="remote-view-status" aria-live="polite">Connecting…</span></main>
+<main aria-label="Pencil editor" data-testid="remote-editor-viewport">
+  <img tabindex="0" draggable="false" data-testid="remote-editor-image" alt="Live Pencil canvas">
+  <div class="view-controls">
+    <div>
+      <div role="group" aria-label="View mode" data-label="mode">
+        <button type="button" data-control="hand" aria-pressed="true">Hand</button>
+        <button type="button" data-control="edit" aria-pressed="false" disabled>Edit</button>
+      </div>
+      <button type="button" data-control="openNative" aria-label="Open in Pencil" disabled><span aria-hidden="true">↗</span></button>
+    </div>
+    <div role="group" aria-label="Zoom" data-label="zoom">
+      <button type="button" data-control="zoomOut" aria-label="Zoom out" disabled>−</button>
+      <button type="button" data-control="zoomIn" aria-label="Zoom in" disabled>+</button>
+    </div>
+  </div>
+  <span role="status" data-testid="remote-view-status" aria-live="polite">Connecting…</span>
+</main>
 <script type="module" src="/view.mjs"></script></html>

@@ -24,9 +24,10 @@ test('a new open result and automatic service recovery each display the replacem
     target[key] = value;
     if (key === 'rendererId' && value === recoveryEditor?.sessionId) renderedRecovery.resolve();
     return true;
-  } }), addEventListener() {}, async decode() {}, removeAttribute(name) { delete this[name]; } };
+  } }), setAttribute() {}, addEventListener() {}, async decode() {}, removeAttribute(name) { delete this[name]; } };
   const status = { textContent: 'Connecting…', toggleAttribute() {} };
-  const viewport = { getBoundingClientRect: () => ({ width: 800, height: 900 }) };
+  const viewport = { toggleAttribute() {}, getBoundingClientRect: () => ({ width: 800, height: 900 }) };
+  const controls = ['hand', 'edit', 'zoomOut', 'zoomIn', 'openNative'].map(control => ({ dataset: { control }, setAttribute() {}, addEventListener() {} }));
   let app;
   class HostApp {
     constructor() { app = this; }
@@ -61,7 +62,8 @@ test('a new open result and automatic service recovery each display the replacem
   new Script(bundle.outputFiles[0].text).runInContext(createContext({
     HostApp, crypto: webcrypto, window: { pencilRemoteApp: true }, location: { hash: '' }, URLSearchParams, setTimeout, clearTimeout, AbortController, AbortSignal,
     ResizeObserver: class { observe() {} disconnect() {} },
-    document: { querySelector: selector => selector === 'img' ? image : selector === 'main' ? viewport : status, addEventListener() {}, removeEventListener() {} },
+    navigator: { language: 'en' },
+    document: { documentElement: { lang: 'en' }, querySelectorAll: selector => selector === '[data-control]' ? controls : [], querySelector: selector => selector === 'img' ? image : selector === 'main' ? viewport : status, addEventListener() {}, removeEventListener() {} },
   }));
   try {
     await setImmediate();
