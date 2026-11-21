@@ -70,6 +70,14 @@ Read [the lifecycle and migration contract](docs/pencil-persistent.md).
 
 Read [the plugin skill](skills/pencil/SKILL.md). `.pen` contents are opaque: edit through the engine, never by parsing or rewriting the file manually. `Generate(...)` asynchronous generation is unsupported. The syntactic guard is not a JavaScript sandbox.
 
+### Checking the Codex view
+
+`pencil_open` returns the engine state before Codex mounts the MCP App. Repeated calls for the same document and scope reuse the engine and can create additional Codex tabs. Open each existing document once per chat. Reuse that tab for viewing and keep the returned session ID for all reads, edits, saves and exports. Call `pencil_begin` on that same session when a new participation lease is needed. Call `pencil_open` again only when a new view is explicitly needed and the previous view has been confirmed closed, or when recovering a session confirmed gone.
+
+If the view is missing after an open, check `pencil_status` with the returned session ID. `editorReady` describes the engine, and `renderer.viewers` counts attached transports, including hidden views. For a Desktop integration diagnosis, correlate the `pencil_open` call ID with Codex's MCP App `session_created` and `Started app widget` events. Verify right-pane placement in Codex.
+
+Codex owns tab selection and individual tab closure. To remove duplicates, close each confirmed duplicate in the Codex tab bar while keeping the desired view open. Reserve `pencil_close` for finishing the entire document session, which saves the document and releases its engine and all attached views.
+
 ## Save, captures and exports
 
 | Tool | Result |
